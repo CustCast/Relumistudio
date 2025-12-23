@@ -1,0 +1,119 @@
+{
+  "name": "relumistudio",
+  "displayName": "ReLumiStudio",
+  "description": "Full IDE suite for Pokémon BDSP scripting (Editor, Previewer, Tools)",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "publisher": "relumistudio",
+  "contributes": {
+    "languages": [
+      {
+        "id": "bdsp",
+        "aliases": [
+          "RelumiScript",
+          "BDSP Script"
+        ],
+        "extensions": [
+          ".ev"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[bdsp]": {
+        "editor.minimap.enabled": false,
+        "editor.lineNumbers": "on",
+        "editor.renderWhitespace": "none",
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4
+      }
+    },
+    "grammars": [
+      {
+        "language": "bdsp",
+        "scopeName": "source.bdsp",
+        "path": "./syntaxes/bdsp.tmLanguage.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "relumi-sidebar",
+          "title": "ReLumiStudio",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "relumi-sidebar": [
+        {
+          "id": "relumi-scripts",
+          "name": "Script Explorer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "relumistudio.openHintEditor",
+        "title": "ReLumiStudio: Open Hint Editor",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.refreshData",
+        "title": "ReLumiStudio: Refresh Data",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.openAnalysis",
+        "title": "ReLumiStudio: Analyze Project (Unused Flags)",
+        "category": "ReLumiStudio"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "relumistudio.openHintEditor",
+          "when": "resourceLangId == bdsp",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "relumistudio.openHintEditor",
+          "when": "view == relumi-scripts",
+          "group": "navigation"
+        },
+        {
+          "command": "relumistudio.openAnalysis",
+          "when": "view == relumi-scripts",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.107.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.48.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
