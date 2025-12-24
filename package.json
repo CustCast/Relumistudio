@@ -49,6 +49,13 @@
           "title": "ReLumiStudio",
           "icon": "media/icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "relumi-tools",
+          "title": "Script Tools",
+          "icon": "$(comment-discussion)"
+        }
       ]
     },
     "views": {
@@ -56,6 +63,13 @@
         {
           "id": "relumi-scripts",
           "name": "Script Explorer"
+        }
+      ],
+      "relumi-tools": [
+        {
+          "id": "relumi-message-preview",
+          "name": "Message Preview",
+          "type": "webview"
         }
       ]
     },
