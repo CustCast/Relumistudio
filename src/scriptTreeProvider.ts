@@ -1,100 +1,77 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 
-export class ScriptTreeProvider implements vscode.TreeDataProvider<ScriptItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<ScriptItem | undefined | null | void> = new vscode.EventEmitter<ScriptItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<ScriptItem | undefined | null | void> = this._onDidChangeTreeData.event;
+export class ScriptTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 
-    constructor() {}
+    private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+    constructor() {
+        // Refresh tree when active editor changes
+        vscode.window.onDidChangeActiveTextEditor(() => this.refresh());
+        vscode.workspace.onDidChangeTextDocument(e => this.onDocumentChanged(e));
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
 
-    getTreeItem(element: ScriptItem): vscode.TreeItem {
+    private onDocumentChanged(changeEvent: vscode.TextDocumentChangeEvent): void {
+        if (vscode.window.activeTextEditor && changeEvent.document.uri.toString() === vscode.window.activeTextEditor.document.uri.toString()) {
+            this.refresh();
+        }
+    }
+
+    getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
         return element;
     }
 
-    async getChildren(element?: ScriptItem): Promise<ScriptItem[]> {
-        // 1. Root Level: List all .ev files in the workspace
-        if (!element) {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders) return [];
-
-            // Find all .ev files
-            const files = await vscode.workspace.findFiles('**/*.ev');
-            
-            return files.sort((a, b) => path.basename(a.fsPath).localeCompare(path.basename(b.fsPath)))
-                .map(fileUri => {
-                    const fileName = path.basename(fileUri.fsPath);
-                    // Collapsed state means it has children (scripts)
-                    return new ScriptItem(fileName, vscode.TreeItemCollapsibleState.Collapsed, 'file', fileUri);
-                });
+    getChildren(element?: vscode.TreeItem): Thenable<vscode.TreeItem[]> {
+        // If we are inside an element, return empty (flat list for now)
+        if (element) {
+            return Promise.resolve([]);
         }
 
-        // 2. Child Level: List "Scripts" (Labels) inside a file
-        if (element.type === 'file' && element.resourceUri) {
-            try {
-                const content = fs.readFileSync(element.resourceUri.fsPath, 'utf-8');
-                const scriptLabels = this.parseLabels(content);
-                
-                return scriptLabels.map(labelInfo => {
-                    return new ScriptItem(labelInfo.name, vscode.TreeItemCollapsibleState.None, 'script', element.resourceUri, labelInfo.line);
-                });
-            } catch (e) {
-                console.error("Error parsing file:", e);
-                return [];
-            }
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'bdsp') {
+            return Promise.resolve([]);
         }
 
-        return [];
-    }
-
-    // Regex to find labels like "Script_Name:"
-    private parseLabels(content: string): { name: string, line: number }[] {
-        const lines = content.split('\n');
-        const results = [];
+        // FIX: Explicitly type the array
+        const items: vscode.TreeItem[] = [];
+        
+        const text = editor.document.getText();
+        const lines = text.split('\n');
+        
+        // Regex to match "LabelName:" at start of line
         const regex = /^\s*([A-Za-z0-9_]+):/;
 
         for (let i = 0; i < lines.length; i++) {
-            const match = lines[i].match(regex);
+            const line = lines[i];
+            const match = regex.exec(line);
             if (match) {
-                results.push({ name: match[1], line: i });
+                const labelName = match[1];
+                const item = new vscode.TreeItem(labelName, vscode.TreeItemCollapsibleState.None);
+                
+                item.iconPath = new vscode.ThemeIcon('symbol-method');
+                item.description = `Line ${i + 1}`;
+                
+                // Clicking the item jumps to the line
+                item.command = {
+                    command: 'editor.action.goToLocations',
+                    title: 'Go to Label',
+                    arguments: [
+                        editor.document.uri,
+                        new vscode.Position(i, 0),
+                        [],
+                        "goto",
+                        ""
+                    ]
+                };
+                
+                items.push(item);
             }
         }
-        return results;
-    }
-}
 
-export class ScriptItem extends vscode.TreeItem {
-    constructor(
-        public readonly label: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly type: 'file' | 'script',
-        public readonly fileUri?: vscode.Uri,
-        public readonly line?: number
-    ) {
-        super(label, collapsibleState);
-        this.resourceUri = type === 'file' ? fileUri : undefined;
-        
-        if (type === 'file') {
-            this.iconPath = vscode.ThemeIcon.File;
-            this.contextValue = 'file';
-        } else {
-            this.iconPath = new vscode.ThemeIcon('symbol-function');
-            this.contextValue = 'script';
-            this.description = `Ln ${line! + 1}`;
-            
-            // Add click command to jump to line
-            this.command = {
-                command: 'vscode.open',
-                title: 'Open Script',
-                arguments: [
-                    fileUri,
-                    { selection: new vscode.Range(line || 0, 0, line || 0, 0) }
-                ]
-            };
-        }
+        return Promise.resolve(items);
     }
 }
