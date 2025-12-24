@@ -18,31 +18,48 @@
     let pageIndex = 0;
 
     // --- Constants ---
-    const BASE_FONT_SIZE = 54.0;
-    const BASE_METRIC = 573.0;
+    // User requested 64px Base Size (Matches Atlas)
+    const BASE_FONT_SIZE = 64.0;
+    
+    // Game Logic is based on 54.0 units. 
+    // We must scale spacing by (64/54) to match the larger font size.
+    const GAME_BASE_SIZE = 54.0;
+    const SIZE_SCALE = BASE_FONT_SIZE / GAME_BASE_SIZE; 
+
     const MAX_WIDTH = 1080.0;
     const CALIBRATION_PHRASE = "Oh. And it needs to be found and caught down";
     const MAX_LINES_PER_PAGE = 2;
+
     const TEXT_OFFSET_X = 100; 
     const TEXT_OFFSET_Y = 40; 
     const LINE_HEIGHT_INC = 10; 
-    let pixelsPerUnit = 1.88; 
+
+    // Canvas Resolution
+    const CANVAS_WIDTH = 1500;
+    const CANVAS_HEIGHT = 230;
+
+    // Calibration Defaults (RelumiScript C# Defaults)
+    let pixelsPerUnit = 1.8848; 
+    let baseMetric = 573.0; 
 
     // --- Init ---
     async function init() {
         try {
             await loadMetrics();
 
+            // Load Atlas
             const mapResp = await fetch(window.atlasMapUri);
             if (!mapResp.ok) throw new Error("Atlas Map 404");
             const mapData = await mapResp.json();
             atlasMap = mapData.glyphs || mapData;
             atlasMap.size = mapData.size || 100; 
 
+            // Load Textbox
             textboxImage = new Image();
             textboxImage.src = window.textboxUri;
             await new Promise(r => { textboxImage.onload = r; textboxImage.onerror = r; });
 
+            // Load Fonts
             const promises = [];
             for (let i = 0; i < 8; i++) {
                 const img = new Image();
@@ -53,6 +70,11 @@
 
             calibrateMetrics();
             assetsLoaded = true;
+            
+            // Set Canvas Resolution
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+
             draw();
 
         } catch (e) {
@@ -64,24 +86,74 @@
     async function loadMetrics() {
         try {
             const resp = await fetch(window.metricsUri);
-            if (!resp.ok) return;
+            if (!resp.ok) {
+                console.warn("Metrics file not found, using defaults.");
+                return;
+            }
             const text = await resp.text();
             const lines = text.split(/\r?\n/);
             lines.forEach(line => {
                 if (!line || line.startsWith("//")) return;
-                if (line.startsWith(" ") && !isNaN(parseFloat(line.trim()))) {
-                    metrics[" "] = parseFloat(line.trim());
-                    return;
+                
+                // --- Robust Parsing (Matches atlas.py) ---
+                let char = null;
+                let width = 0.0;
+
+                // Handle Comma lines: ", 8.8" or "A,20.5"
+                if (line.includes(",")) {
+                    if (line.startsWith(",")) {
+                        // Special case for comma char itself
+                        const parts = line.split(",");
+                        // split(", 8.8") -> ["", " 8.8"]
+                        if (parts.length >= 2) {
+                            char = ",";
+                            width = parseFloat(parts[1]);
+                        }
+                    } else {
+                        const parts = line.split(",");
+                        if (parts.length >= 2) {
+                            char = parts[0];
+                            width = parseFloat(parts[1]);
+                        }
+                    }
+                } 
+                // Handle Space lines: "  10.5" or "- 10.5"
+                else if (line.trim().length > 0) {
+                    // Check for space key " 8.67"
+                    if (line.startsWith(" ") && !isNaN(parseFloat(line.trim()))) {
+                        char = " ";
+                        width = parseFloat(line.trim());
+                    } else {
+                        const parts = line.split(/[ \t]+/).filter(s => s.length > 0);
+                        if (parts.length >= 2) {
+                            char = parts[0];
+                            width = parseFloat(parts[parts.length - 1]);
+                        }
+                    }
                 }
-                const parts = line.split(/[ ,]/).filter(s => s.length > 0);
-                if (parts.length >= 2) metrics[parts[0]] = parseFloat(parts[1]);
+
+                if (char !== null && !isNaN(width)) {
+                    metrics[char] = width;
+                }
             });
-        } catch (e) {}
+            
+            // Ensure space default
+            if (!metrics[" "]) metrics[" "] = 8.671875;
+
+        } catch (e) {
+            console.error("Error loading metrics:", e);
+        }
     }
 
     function calibrateMetrics() {
         const measured = measureText(CALIBRATION_PHRASE);
-        if (measured > 0) pixelsPerUnit = MAX_WIDTH / measured;
+        if (measured > 0) {
+            baseMetric = measured;
+            pixelsPerUnit = MAX_WIDTH / measured;
+            debug.innerText = `Calibrated: Metric=${baseMetric.toFixed(1)}, PPU=${pixelsPerUnit.toFixed(4)}, Scale=${SIZE_SCALE.toFixed(2)}`;
+        } else {
+            debug.innerText = "Calibration Failed: Using Defaults";
+        }
     }
 
     // --- UI Handlers ---
@@ -97,16 +169,14 @@
         }
     });
 
-    // --- LOGIC PORTED FROM MessageRenderer.cs ---
+    // --- Logic ---
 
     function splitIntoPages(rawText) {
-        // 1. Normalize Macros
         let text = rawText
             .replace(/\\n/g, '{n}')
             .replace(/\\r/g, '{r}')
             .replace(/\\f/g, '{f}');
 
-        // 2. Split Tokens (FIXED Regex escaping)
         const tokens = text.split(/(\{n\}|\{f\}|\{r\})/g);
         const pages = [];
         let currentPage = [];
@@ -116,9 +186,7 @@
             const token = tokens[i];
             if (!token) continue;
 
-            if (token === '{n}') {
-                // No-op in C#, just separates text
-            } 
+            if (token === '{n}') { /* No-op */ } 
             else if (token === '{r}') {
                 if (currentPage.length > 0) { pages.push(currentPage.join('\n')); currentPage = []; }
                 lastLine = null;
@@ -150,30 +218,44 @@
     }
 
     function measureText(text) {
-        let width = 0;
+        let width = 0.0;
         for (let i = 0; i < text.length; i++) {
-            if (i + 2 < text.length && text.substring(i, 3) === "{n}") { width += 343.6875; i += 2; continue; }
+            // Check for {n}
+            if (i + 2 < text.length && text.substring(i, i + 3) === "{n}") { 
+                width += 343.6875; 
+                i += 2; 
+                continue; 
+            }
+            
             let char = text[i];
             if (char === "'") char = "’";
+
             if (metrics[char] !== undefined) width += metrics[char];
-            else if (!isNaN(parseInt(char))) width += 15.0;
-            else width += 8.67;
+            else if (!isNaN(parseInt(char))) width += 15.0; 
+            else width += 8.671875;
         }
         return width;
     }
 
     function calculateAdvance(char, lineScale) {
         let charStr = char === "'" ? "’" : char;
-        let w = 8.67;
+        let w = 8.671875;
+        
         if (metrics[charStr] !== undefined) w = metrics[charStr];
         else if (!isNaN(parseInt(char))) w = 15.0;
-        return w * pixelsPerUnit * lineScale;
+
+        // Formula: Metric * PPU * LineSquish * (64/54 Scale)
+        return w * pixelsPerUnit * lineScale * SIZE_SCALE;
     }
 
     function draw() {
         lblPage.innerText = `Page ${pageIndex + 1}/${currentPages.length}`;
         btnPrev.disabled = pageIndex === 0;
         btnNext.disabled = pageIndex === currentPages.length - 1;
+
+        // Reset Canvas
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
 
         ctx.fillStyle = "#202020";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -192,37 +274,57 @@
 
         lines.forEach(line => {
             if (!line) return;
+
+            // Layout Calculation
             const lineWidth = measureText(line);
             let lineScale = 1.0;
-            if (lineWidth > BASE_METRIC) lineScale = BASE_METRIC / lineWidth;
+            
+            if (lineWidth > baseMetric) {
+                lineScale = baseMetric / lineWidth;
+            }
 
             const targetFontSize = BASE_FONT_SIZE * lineScale;
             const renderScale = targetFontSize / refSize;
+
             let cursorX = TEXT_OFFSET_X;
 
             for (let i = 0; i < line.length; i++) {
                 const char = line[i];
                 const advance = calculateAdvance(char, lineScale);
-                if (char === ' ') { cursorX += advance; continue; }
-                
+
+                if (char === ' ') {
+                    cursorX += advance;
+                    continue;
+                }
+
                 const code = char.charCodeAt(0);
                 const hex = code.toString(16).toUpperCase().padStart(4, '0');
                 const glyph = atlasMap[hex];
+
                 if (glyph) {
                     const pageIdx = glyph.p !== undefined ? glyph.p : 0;
                     const sourceImg = atlasImages[pageIdx];
+
                     if (sourceImg && sourceImg.complete) {
-                        ctx.drawImage(sourceImg, glyph.x, glyph.y, glyph.w, glyph.h,
-                            cursorX + (glyph.ox * renderScale), currentY + (glyph.oy * renderScale),
-                            glyph.w * renderScale, glyph.h * renderScale);
+                        ctx.drawImage(
+                            sourceImg,
+                            glyph.x, glyph.y, glyph.w, glyph.h,
+                            cursorX + (glyph.ox * renderScale), 
+                            currentY + (glyph.oy * renderScale),
+                            glyph.w * renderScale, 
+                            glyph.h * renderScale
+                        );
                     }
                 } 
                 else {
+                     // Error Box
                      ctx.fillStyle = "red";
                      ctx.fillRect(cursorX, currentY, 10 * renderScale, targetFontSize);
                 }
+
                 cursorX += advance;
             }
+
             currentY += targetFontSize + LINE_HEIGHT_INC;
         });
     }

@@ -158,6 +158,7 @@ export class DataManager {
                         else if (wordEventID === 0 || wordEventID === 2 || wordEventID >= 5) { /* No op */ }
                         else currentFullText += "{n}";
                     } else {
+                        // Default behavior if no ID is provided: Newline
                         currentFullText += "{n}";
                     }
                 }
@@ -169,10 +170,10 @@ export class DataManager {
                 const rawLine = lines[i];
                 const trimmed = rawLine.trim();
                 
-                // FIX: Check for dash BEFORE stripping it to detect new list items
+                // DETECT LIST ITEM DASH
                 const isNewItem = rawLine.trimStart().startsWith("-");
                 
-                // Strip dash for property checking
+                // Clean the line
                 const cleanLine = trimmed.replace(/^- /, ''); 
 
                 if (cleanLine.startsWith("labelDataArray:")) {
@@ -182,7 +183,7 @@ export class DataManager {
 
                 if (inLabelArray) {
                     if (cleanLine.startsWith("labelName:")) {
-                        commitWord(); // Commit any pending word
+                        commitWord(); // Commit pending word from previous label
                         
                         // Save previous label
                         if (currentLabel && currentFullText) {
@@ -200,30 +201,30 @@ export class DataManager {
                         inWordData = true;
                     }
                     else if (inWordData) {
-                        // Check for exit via new label properties
-                        if (cleanLine.startsWith("arrayIndex:") || cleanLine.startsWith("labelName:")) {
+                        // Check if we exited wordDataArray (by seeing a new property like arrayIndex at root level)
+                        // However, arrayIndex is usually part of the list item.
+                        // We rely on isNewItem to trigger commits.
+                        
+                        if (cleanLine.startsWith("labelName:")) {
                             inWordData = false;
-                            // Re-evaluate this line in next loop if necessary, but here we just stop word processing
-                            // Note: We don't verify if this is valid YAML structure traversal, but it works for Unity dumps.
-                            
-                            // If it's a sibling property of label (like arrayIndex), we just ignore it for now
-                        } 
-                        else {
-                            // FIX: If this line started with "-", it means a NEW WORD in the array
-                            if (isNewItem) {
-                                commitWord();
-                            }
+                            i--; // Re-process this line
+                            continue;
+                        }
 
-                            if (cleanLine.startsWith("str:")) {
-                                let val = cleanLine.substring("str:".length).trim();
-                                if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
-                                wordStr = val;
-                            }
-                            else if (cleanLine.startsWith("eventID:")) {
-                                const val = cleanLine.substring("eventID:".length).trim();
-                                const id = parseInt(val);
-                                if (!isNaN(id)) wordEventID = id;
-                            }
+                        // If a line starts with "- ", it is the start of a NEW word object
+                        if (isNewItem) {
+                            commitWord();
+                        }
+
+                        if (cleanLine.startsWith("str:")) {
+                            let val = cleanLine.substring("str:".length).trim();
+                            if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+                            wordStr = val;
+                        }
+                        else if (cleanLine.startsWith("eventID:")) {
+                            const val = cleanLine.substring("eventID:".length).trim();
+                            const id = parseInt(val);
+                            if (!isNaN(id)) wordEventID = id;
                         }
                     }
                 }

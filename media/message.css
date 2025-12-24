@@ -10,7 +10,7 @@ body {
 
 .controls {
     width: 100%;
-    max-width: 1080px;
+    max-width: 1500px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -52,8 +52,9 @@ button:hover:not(:disabled) {
 
 canvas {
     width: 100%;
-    max-width: 1080px;
+    max-width: 1500px;
     height: auto;
+    aspect-ratio: 1500 / 230;
     border: 1px solid var(--vscode-widget-border);
 }
 
@@ -61,4 +62,6 @@ canvas {
     color: red;
     font-size: 12px;
     white-space: pre-wrap;
+    width: 100%;
+    text-align: center;
 }
