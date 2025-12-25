@@ -1,58 +1,115 @@
 {
-    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-    "name": "RelumiScript",
-    "scopeName": "source.bdsp",
-    "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#labels" },
-        { "include": "#flags" },
-        { "include": "#sysflags" },
-        { "include": "#works" },
-        { "include": "#numbers" },
-        { "include": "#commands" },
-        { "include": "#operators" }
-    ],
-    "repository": {
-        "comments": {
-            "patterns": [
-                { "name": "comment.line.double-slash.bdsp", "match": "//.*$" },
-                { "name": "comment.line.semicolon.bdsp", "match": ";.*$" }
-            ]
-        },
-        "strings": {
-            "name": "string.quoted.single.bdsp",
-            "begin": "'", "end": "'",
-            "patterns": [ { "name": "constant.character.escape.bdsp", "match": "\\\\." } ]
-        },
-        "labels": {
-            "match": "^\\s*([a-zA-Z0-9_]+):",
-            "name": "entity.name.function.bdsp" 
-        },
-        "commands": {
-            "comment": "Changed to keyword.control to usually force Purple/Mauve colors",
-            "match": "\\b[A-Z_][A-Z0-9_]*\\b",
-            "name": "keyword.control.bdsp"
-        },
-        "flags": {
-            "match": "#[A-Za-z0-9_\\-]+",
-            "name": "constant.language.bdsp"
-        },
-        "sysflags": {
-            "match": "\\$[A-Za-z0-9_\\-]+",
-            "name": "variable.language.bdsp"
-        },
-        "works": {
-            "match": "@[A-Za-z0-9_\\-]+",
-            "name": "variable.parameter.bdsp"
-        },
-        "numbers": {
-            "name": "constant.numeric.bdsp",
-            "match": "\\b\\d+(\\.\\d+)?\\b"
-        },
-        "operators": {
-            "name": "keyword.operator.bdsp",
-            "match": "[,=]"
-        }
-    }
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "RelumiScript",
+	"scopeName": "source.bdsp",
+	"patterns": [
+		{
+			"include": "#labels"
+		},
+		{
+			"include": "#comments"
+		}
+	],
+	"repository": {
+		"labels": {
+			"patterns": [
+				{
+					"begin": "^\\s*([a-zA-Z0-9_]+)(:)",
+					"beginCaptures": {
+						"1": {
+							"name": "entity.name.function.bdsp"
+						},
+						"2": {
+							"name": "punctuation.separator.key-value.bdsp"
+						}
+					},
+					"while": "^(\\t| {1,4})(.*)",
+					"whileCaptures": {
+						"2": {
+							"patterns": [
+								{
+									"include": "#commands"
+								},
+								{
+									"include": "#comments"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		"commands": {
+			"patterns": [
+				{
+					"begin": "\\b([A-Z_][A-Z0-9_]*)\\b\\s*(\\()",
+					"beginCaptures": {
+						"1": {
+							"name": "keyword.control.bdsp"
+						},
+						"2": {
+							"name": "punctuation.parenthesis.begin.bdsp"
+						}
+					},
+					"end": "\\)",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.parenthesis.end.bdsp"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#strings"
+						},
+						{
+							"include": "#arguments"
+						},
+						{
+							"match": ",",
+							"name": "punctuation.separator.delimiter.bdsp"
+						}
+					]
+				}
+			]
+		},
+		"arguments": {
+			"patterns": [
+				{
+					"match": "#[A-Za-z0-9_\\-]+",
+					"name": "constant.language.bdsp"
+				},
+				{
+					"match": "\\$[A-Za-z0-9_\\-]+",
+					"name": "variable.language.bdsp"
+				},
+				{
+					"match": "@[A-Za-z0-9_\\-]+",
+					"name": "variable.parameter.bdsp"
+				},
+				{
+					"match": "\\b\\d+(\\.\\d+)?\\b",
+					"name": "constant.numeric.bdsp"
+				}
+			]
+		},
+		"strings": {
+			"name": "string.quoted.single.bdsp",
+			"begin": "'",
+			"end": "'",
+			"patterns": [
+				{
+					"match": "\\\\.",
+					"name": "constant.character.escape.bdsp"
+				}
+			]
+		},
+		"comments": {
+			"patterns": [
+				{
+					"name": "comment.line.semicolon.bdsp",
+					"match": ";.*$"
+				}
+			]
+		}
+	}
 }

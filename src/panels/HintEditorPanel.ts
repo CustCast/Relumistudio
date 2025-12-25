@@ -135,7 +135,6 @@ export class HintEditorPanel {
         .cmd-item { 
             padding: 4px 8px; cursor: pointer; display: flex; align-items: center; 
             font-family: 'Consolas', monospace; font-size: 12px; border-left: 3px solid transparent;
-            /* FIX: Allow wrapping so long names aren't cut off */
             word-wrap: break-word;
         }
         .cmd-item:hover { background: var(--hover); }
@@ -289,6 +288,9 @@ export class HintEditorPanel {
             if (!hint.Params) hint.Params = [];
             updateGlobalRefDropdown();
             hint.Params.forEach((p, pIndex) => {
+                if (!p.Fragments) p.Fragments = {}; 
+                if (!p.Type) p.Type = ['Value'];
+
                 const card = document.createElement('div');
                 card.className = 'param-card';
                 const depVal = (p.DependsOn !== undefined && p.DependsOn !== null) ? p.DependsOn : '';
@@ -435,22 +437,46 @@ export class HintEditorPanel {
                 } catch(e) {}
             }
             const p = allHints[selectedIndex].Params[pIndex];
+            
+            if (!p.Fragments) p.Fragments = {}; // Ensure initialization
             p.Fragments[type] = \`\${prefix}{Value}\${suffix}\`;
+            
             triggerLiveUpdate();
         }
 
         function onCategoryChange(pIndex, tIndex, newCategory) { updateType(pIndex, tIndex, CategoryMap[newCategory][0]); }
         function onTypeChange(pIndex, tIndex, newType) { updateType(pIndex, tIndex, newType); }
+        
         function updateType(pIndex, tIndex, newType) {
             const p = allHints[selectedIndex].Params[pIndex];
             const oldType = p.Type[tIndex];
-            const oldFrag = p.Fragments[oldType];
-            delete p.Fragments[oldType];
-            p.Fragments[newType] = oldFrag || '{Value}';
+
+            if (oldType === newType) return; // Prevent unnecessary updates and accidental deletion
+
+            // Check if oldType is used by other rows
+            let othersUseOld = false;
+            p.Type.forEach((t, i) => { if(i !== tIndex && t === oldType) othersUseOld = true; });
+
+            if (!p.Fragments) p.Fragments = {}; // Ensure exists
+            const content = p.Fragments[oldType] || '{Value}';
             p.Type[tIndex] = newType;
-            if (p.ShowZero && p.ShowZero.includes(oldType)) {
-                p.ShowZero = p.ShowZero.filter(x=>x!==oldType); p.ShowZero.push(newType);
+
+            // Preserve content to new type if not exists
+            if (!p.Fragments[newType]) {
+                p.Fragments[newType] = content;
             }
+
+            // Only delete old type key if no one else uses it
+            if (!othersUseOld) {
+                delete p.Fragments[oldType];
+            }
+            
+            // Handle Zero Logic
+            if (p.ShowZero && p.ShowZero.includes(oldType)) {
+                p.ShowZero = p.ShowZero.filter(x=>x!==oldType); 
+                p.ShowZero.push(newType);
+            }
+
             renderFragments(pIndex, p);
             triggerLiveUpdate();
         }
@@ -518,15 +544,29 @@ export class HintEditorPanel {
             allHints[selectedIndex].Params[i][key] = val;
             triggerLiveUpdate();
         }
+        
         function addFragment(pIndex) {
             const p = allHints[selectedIndex].Params[pIndex];
-            p.Type.push('Value'); if(!p.Fragments) p.Fragments={}; p.Fragments['Value']="{Value}"; renderFragments(pIndex, p);
+            p.Type.push('Value'); 
+            if(!p.Fragments) p.Fragments={}; 
+            if (!p.Fragments['Value']) p.Fragments['Value']="{Value}"; 
+            renderFragments(pIndex, p);
             triggerLiveUpdate();
         }
+        
         function removeFrag(pIndex, tIndex) {
             const p = allHints[selectedIndex].Params[pIndex];
             const type = p.Type[tIndex];
-            p.Type.splice(tIndex, 1); delete p.Fragments[type]; renderFragments(pIndex, p);
+            
+            // Check usage
+            let othersUse = false;
+            p.Type.forEach((t, i) => { if (i !== tIndex && t === type) othersUse = true; });
+
+            p.Type.splice(tIndex, 1); 
+            
+            if (!othersUse) delete p.Fragments[type]; 
+            
+            renderFragments(pIndex, p);
             triggerLiveUpdate();
         }
         function updateFrag(pIndex, type, key, val) {

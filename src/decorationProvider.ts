@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataManager } from './dataManager';
+import { DataManager, HintParam } from './dataManager';
 
 export class BDSPDecorationProvider {
     private decorationType: vscode.TextEditorDecorationType;
@@ -56,43 +56,15 @@ export class BDSPDecorationProvider {
                     const paramDef = hintConfig.Params?.find(p => p.Ref === refName);
                     
                     if (paramDef && args.length > paramDef.Index) {
-                        const rawValStr = args[paramDef.Index];
-                        const rawVal = parseInt(rawValStr);
-                        let resolvedText = rawValStr;
+                        const valStr = args[paramDef.Index];
+                        const resolved = this.resolveParamFragment(valStr, paramDef, args);
                         
-                        if (!isNaN(rawVal)) {
-                            const type = (paramDef.Type && paramDef.Type.length > 0) ? paramDef.Type[0] : 'Value';
-                            
-                            let lookupName = rawValStr;
-                            
-                            if (type === 'Pokemon') lookupName = data.pokes.get(rawVal) || lookupName;
-                            else if (type === 'Item') lookupName = data.items.get(rawVal) || lookupName;
-                            else if (type === 'Ball') {
-                                const itemId = data.balls.get(rawVal);
-                                if (itemId) lookupName = data.items.get(itemId) || lookupName;
-                            }
-                            // Form Logic
-                            else if (type === 'Form' && paramDef.DependsOn !== undefined) {
-                                const depIdx = paramDef.DependsOn;
-                                if (args.length > depIdx) {
-                                    const pokeId = parseInt(args[depIdx]);
-                                    if (!isNaN(pokeId)) {
-                                        const formKey = `${pokeId}_${rawVal}`;
-                                        if (data.forms.has(formKey)) {
-                                            lookupName = data.forms.get(formKey)!;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            if (paramDef.Fragments && paramDef.Fragments[type]) {
-                                resolvedText = paramDef.Fragments[type].replace('{Value}', lookupName);
-                            } else {
-                                resolvedText = lookupName;
-                            }
+                        // Only add if it didn't return null (handled by Hide if 0)
+                        if (resolved !== null) {
+                            sentenceParts.push(resolved);
                         }
-                        sentenceParts.push(resolvedText);
                     } else {
+                        // Argument missing in code
                         sentenceParts.push("?");
                     }
                 }
@@ -117,6 +89,98 @@ export class BDSPDecorationProvider {
         }
 
         editor.setDecorations(this.decorationType, decorations);
+    }
+
+    private resolveParamFragment(valStr: string, param: HintParam, allArgs: string[]): string | null {
+        const data = DataManager.getInstance();
+        const val = parseInt(valStr);
+        const isNum = !isNaN(val);
+        const isZero = isNum && val === 0;
+
+        let detectedType = "Value";
+        let displayValue = valStr;
+
+        // 1. Detect Type & Resolve Value
+        if (param.Type) {
+            for (const t of param.Type) {
+                if (t === "Value") continue; // Lowest priority, handled by default
+                
+                // --- Special Data Lookups ---
+                if (t === "Pokemon" && isNum && data.pokes.has(val)) {
+                    detectedType = t;
+                    displayValue = data.pokes.get(val)!;
+                    break;
+                }
+                if (t === "Item" && isNum && data.items.has(val)) {
+                    detectedType = t;
+                    displayValue = data.items.get(val)!;
+                    break;
+                }
+                if (t === "Ball" && isNum && data.balls.has(val)) {
+                    detectedType = t;
+                    const itemId = data.balls.get(val)!;
+                    displayValue = data.items.get(itemId) || "Unknown Ball";
+                    break;
+                }
+                if (t === "Form" && param.DependsOn !== undefined && isNum) {
+                    const depStr = allArgs[param.DependsOn];
+                    const depVal = parseInt(depStr);
+                    if (!isNaN(depVal)) {
+                        const formKey = `${depVal}_${val}`;
+                        if (data.forms.has(formKey)) {
+                            detectedType = t;
+                            displayValue = data.forms.get(formKey)!;
+                            break;
+                        }
+                    }
+                }
+                if (t === "Flag" && valStr.startsWith("#")) {
+                    detectedType = t;
+                    break;
+                }
+                if (t === "Work" && valStr.startsWith("@")) {
+                    detectedType = t;
+                    break;
+                }
+
+                // --- Generic Type Support (Fix for Custom Types) ---
+                // If it's not a special type, but the input is a number, we accept it as the detected type.
+                // This allows types like "Number", "Index", "TalkIndex" to be detected so their fragments are used.
+                if (isNum && t !== "String") {
+                    detectedType = t;
+                    break;
+                }
+            }
+        }
+
+        // 2. Handle "Hide if 0"
+        if (isZero && param.ShowZero && param.ShowZero.includes(detectedType)) {
+            return null;
+        }
+
+        // 3. Get Fragment (With Fallback)
+        let fragment = "{Value}";
+        
+        if (param.Fragments) {
+            // Priority 1: Specific detected type (e.g., "TalkIndex")
+            if (param.Fragments[detectedType]) {
+                fragment = param.Fragments[detectedType];
+            } 
+            // Priority 2: Fallback to "Value" if specific type missing
+            else if (param.Fragments["Value"]) {
+                fragment = param.Fragments["Value"];
+            }
+            // Priority 3: Fallback to first available key (if both missing)
+            else {
+                const keys = Object.keys(param.Fragments);
+                if (keys.length > 0) fragment = param.Fragments[keys[0]];
+            }
+        }
+
+        // 4. Replace Placeholders
+        // Supports standard "{Value}" and user-friendly "{RefName}" (e.g. "{talkIndex}")
+        const refPlaceholder = `{${param.Ref}}`;
+        return fragment.split('{Value}').join(displayValue).split(refPlaceholder).join(displayValue);
     }
 
     private parseArgs(argsStr: string): string[] {
