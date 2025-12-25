@@ -6,62 +6,73 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    height: 100vh;
+    justify-content: center; /* Center canvas vertically in panel */
 }
 
-.controls {
+/* Container is now relative to allow absolute positioning of children */
+.canvas-container {
+    position: relative; 
     width: 100%;
     max-width: 1500px;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--vscode-editor-background);
-    padding: 5px 10px;
-    margin-bottom: 5px;
-    border-bottom: 1px solid var(--vscode-widget-border);
-}
-
-button {
-    background: var(--vscode-button-background);
-    color: var(--vscode-button-foreground);
-    border: none;
-    padding: 4px 12px;
-    cursor: pointer;
-    font-family: var(--vscode-font-family);
-}
-
-button:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-button:hover:not(:disabled) {
-    background: var(--vscode-button-hoverBackground);
-}
-
-#pageIndicator {
-    color: var(--vscode-foreground);
-    font-size: 12px;
-    font-weight: bold;
-}
-
-.canvas-container {
-    width: 100%;
-    display: flex;
     justify-content: center;
+    align-items: center;
 }
 
 canvas {
     width: 100%;
-    max-width: 1500px;
     height: auto;
+    max-height: 100%;
     aspect-ratio: 1500 / 230;
     border: 1px solid var(--vscode-widget-border);
+    display: block; /* Removes bottom spacing */
 }
 
-#debug {
-    color: red;
-    font-size: 12px;
-    white-space: pre-wrap;
-    width: 100%;
-    text-align: center;
+/* --- New Overlay Styles --- */
+
+.nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 32px;
+    font-weight: bold;
+    color: black;
+    cursor: pointer;
+    user-select: none;
+    padding: 10px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    z-index: 10;
+    
+    /* Optional: White text shadow to ensure visibility on dark backgrounds */
+    text-shadow: 0px 0px 2px rgba(255, 255, 255, 0.8);
+}
+
+.nav-arrow:hover {
+    opacity: 1.0;
+    transform: translateY(-50%) scale(1.1);
+}
+
+.nav-arrow.left {
+    left: 10px;
+}
+
+.nav-arrow.right {
+    right: 10px;
+}
+
+.page-overlay {
+    position: absolute;
+    top: 5px;
+    right: 15px;
+    color: rgba(0, 0, 0, 0.6);
+    font-size: 14px;
+    font-weight: bold;
+    font-family: var(--vscode-font-family);
+    user-select: none;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
 }

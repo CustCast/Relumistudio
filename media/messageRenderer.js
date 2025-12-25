@@ -1,11 +1,10 @@
 (function () {
     const canvas = document.getElementById('messageCanvas');
     const ctx = canvas.getContext('2d');
-    const debug = document.getElementById('debug');
     
-    // UI Elements
-    const btnPrev = document.getElementById('btnPrev');
-    const btnNext = document.getElementById('btnNext');
+    // UI Elements (New IDs)
+    const arrowPrev = document.getElementById('arrowPrev');
+    const arrowNext = document.getElementById('arrowNext');
     const lblPage = document.getElementById('pageIndicator');
 
     // --- State ---
@@ -18,11 +17,7 @@
     let pageIndex = 0;
 
     // --- Constants ---
-    // User requested 64px Base Size (Matches Atlas)
     const BASE_FONT_SIZE = 64.0;
-    
-    // Game Logic is based on 54.0 units. 
-    // We must scale spacing by (64/54) to match the larger font size.
     const GAME_BASE_SIZE = 54.0;
     const SIZE_SCALE = BASE_FONT_SIZE / GAME_BASE_SIZE; 
 
@@ -31,14 +26,12 @@
     const MAX_LINES_PER_PAGE = 2;
 
     const TEXT_OFFSET_X = 100; 
-    const TEXT_OFFSET_Y = 40; 
-    const LINE_HEIGHT_INC = 10; 
+    const TEXT_OFFSET_Y = 45; 
+    const LINE_HEIGHT_INC = 12; 
 
-    // Canvas Resolution
     const CANVAS_WIDTH = 1500;
     const CANVAS_HEIGHT = 230;
 
-    // Calibration Defaults (RelumiScript C# Defaults)
     let pixelsPerUnit = 1.8848; 
     let baseMetric = 573.0; 
 
@@ -47,19 +40,16 @@
         try {
             await loadMetrics();
 
-            // Load Atlas
             const mapResp = await fetch(window.atlasMapUri);
             if (!mapResp.ok) throw new Error("Atlas Map 404");
             const mapData = await mapResp.json();
             atlasMap = mapData.glyphs || mapData;
             atlasMap.size = mapData.size || 100; 
 
-            // Load Textbox
             textboxImage = new Image();
             textboxImage.src = window.textboxUri;
             await new Promise(r => { textboxImage.onload = r; textboxImage.onerror = r; });
 
-            // Load Fonts
             const promises = [];
             for (let i = 0; i < 8; i++) {
                 const img = new Image();
@@ -71,7 +61,6 @@
             calibrateMetrics();
             assetsLoaded = true;
             
-            // Set Canvas Resolution
             canvas.width = CANVAS_WIDTH;
             canvas.height = CANVAS_HEIGHT;
 
@@ -79,32 +68,24 @@
 
         } catch (e) {
             console.error(e);
-            debug.innerText = "Error: " + e;
         }
     }
 
     async function loadMetrics() {
         try {
             const resp = await fetch(window.metricsUri);
-            if (!resp.ok) {
-                console.warn("Metrics file not found, using defaults.");
-                return;
-            }
+            if (!resp.ok) return;
             const text = await resp.text();
             const lines = text.split(/\r?\n/);
             lines.forEach(line => {
                 if (!line || line.startsWith("//")) return;
                 
-                // --- Robust Parsing (Matches atlas.py) ---
                 let char = null;
                 let width = 0.0;
 
-                // Handle Comma lines: ", 8.8" or "A,20.5"
                 if (line.includes(",")) {
                     if (line.startsWith(",")) {
-                        // Special case for comma char itself
                         const parts = line.split(",");
-                        // split(", 8.8") -> ["", " 8.8"]
                         if (parts.length >= 2) {
                             char = ",";
                             width = parseFloat(parts[1]);
@@ -117,9 +98,7 @@
                         }
                     }
                 } 
-                // Handle Space lines: "  10.5" or "- 10.5"
                 else if (line.trim().length > 0) {
-                    // Check for space key " 8.67"
                     if (line.startsWith(" ") && !isNaN(parseFloat(line.trim()))) {
                         char = " ";
                         width = parseFloat(line.trim());
@@ -136,13 +115,8 @@
                     metrics[char] = width;
                 }
             });
-            
-            // Ensure space default
             if (!metrics[" "]) metrics[" "] = 8.671875;
-
-        } catch (e) {
-            console.error("Error loading metrics:", e);
-        }
+        } catch (e) {}
     }
 
     function calibrateMetrics() {
@@ -150,15 +124,25 @@
         if (measured > 0) {
             baseMetric = measured;
             pixelsPerUnit = MAX_WIDTH / measured;
-            debug.innerText = `Calibrated: Metric=${baseMetric.toFixed(1)}, PPU=${pixelsPerUnit.toFixed(4)}, Scale=${SIZE_SCALE.toFixed(2)}`;
-        } else {
-            debug.innerText = "Calibration Failed: Using Defaults";
         }
     }
 
     // --- UI Handlers ---
-    btnPrev.onclick = () => { if (pageIndex > 0) { pageIndex--; draw(); } };
-    btnNext.onclick = () => { if (pageIndex < currentPages.length - 1) { pageIndex++; draw(); } };
+    
+    // Attach to arrows instead of buttons
+    arrowPrev.onclick = () => { 
+        if (pageIndex > 0) { 
+            pageIndex--; 
+            draw(); 
+        } 
+    };
+    
+    arrowNext.onclick = () => { 
+        if (pageIndex < currentPages.length - 1) { 
+            pageIndex++; 
+            draw(); 
+        } 
+    };
 
     window.addEventListener('message', e => {
         if (e.data.type === 'updateText') {
@@ -220,7 +204,6 @@
     function measureText(text) {
         let width = 0.0;
         for (let i = 0; i < text.length; i++) {
-            // Check for {n}
             if (i + 2 < text.length && text.substring(i, i + 3) === "{n}") { 
                 width += 343.6875; 
                 i += 2; 
@@ -244,14 +227,17 @@
         if (metrics[charStr] !== undefined) w = metrics[charStr];
         else if (!isNaN(parseInt(char))) w = 15.0;
 
-        // Formula: Metric * PPU * LineSquish * (64/54 Scale)
         return w * pixelsPerUnit * lineScale * SIZE_SCALE;
     }
 
     function draw() {
-        lblPage.innerText = `Page ${pageIndex + 1}/${currentPages.length}`;
-        btnPrev.disabled = pageIndex === 0;
-        btnNext.disabled = pageIndex === currentPages.length - 1;
+        // Update Overlays
+        // Page format: "1/2"
+        lblPage.innerText = `${pageIndex + 1}/${currentPages.length}`;
+        
+        // Arrow Visibility Logic
+        arrowPrev.style.display = (pageIndex > 0) ? 'block' : 'none';
+        arrowNext.style.display = (pageIndex < currentPages.length - 1) ? 'block' : 'none';
 
         // Reset Canvas
         canvas.width = CANVAS_WIDTH;
@@ -275,7 +261,6 @@
         lines.forEach(line => {
             if (!line) return;
 
-            // Layout Calculation
             const lineWidth = measureText(line);
             let lineScale = 1.0;
             
@@ -317,14 +302,11 @@
                     }
                 } 
                 else {
-                     // Error Box
                      ctx.fillStyle = "red";
                      ctx.fillRect(cursorX, currentY, 10 * renderScale, targetFontSize);
                 }
-
                 cursorX += advance;
             }
-
             currentY += targetFontSize + LINE_HEIGHT_INC;
         });
     }

@@ -55,15 +55,13 @@ export class MessagePreviewProvider implements vscode.WebviewViewProvider {
             </script>
         </head>
         <body>
-            <div class="controls">
-                <button id="btnPrev" disabled>◀ Prev</button>
-                <span id="pageIndicator">Page 1/1</span>
-                <button id="btnNext" disabled>Next ▶</button>
-            </div>
             <div class="canvas-container">
-                <canvas id="messageCanvas" width="1080" height="230"></canvas>
+                <div id="arrowPrev" class="nav-arrow left">◀</div>
+                <div id="arrowNext" class="nav-arrow right">▶</div>
+                <div id="pageIndicator" class="page-overlay">1/1</div>
+                
+                <canvas id="messageCanvas" width="1500" height="230"></canvas>
             </div>
-            <div id="debug"></div>
             <script src="${scriptUri}"></script>
         </body>
         </html>`;
