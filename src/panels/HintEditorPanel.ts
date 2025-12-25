@@ -237,7 +237,15 @@ export class HintEditorPanel {
         const vscode = acquireVsCodeApi();
         let allHints = [];
         let selectedIndex = -1;
-        const CategoryMap = { "Value": ["Value", "Number", "Pokemon", "Ball", "Form", "Item"], "Work": ["Work"], "Flag": ["Flag"], "SysFlag": ["SysFlag"], "String": ["String", "Event", "Message", "Label"] };
+        
+        // --- ADDED: NumberIndex ---
+        const CategoryMap = { 
+            "Value": ["Value", "Number", "Pokemon", "Ball", "Form", "Item", "TagIndex", "NumberIndex"], 
+            "Work": ["Work"], 
+            "Flag": ["Flag"], 
+            "SysFlag": ["SysFlag"], 
+            "String": ["String", "Event", "Message", "Label"] 
+        };
         const Categories = Object.keys(CategoryMap);
 
         window.addEventListener('message', event => {

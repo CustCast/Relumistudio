@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// --- Interfaces ---
 export interface CommandDef {
     Name: string;
     Args: ArgDef[];
@@ -44,23 +43,19 @@ export interface SimpleDef {
 }
 
 export class DataManager {
-    // Script Data Maps
     public commands: Map<string, CommandDef> = new Map();
     public hints: Map<string, HintConfig> = new Map();
     public flags: Map<string, SimpleDef> = new Map();
     public sysFlags: Map<string, SimpleDef> = new Map();
     public works: Map<string, SimpleDef> = new Map();
 
-    // Game Data Maps
     public pokes: Map<number, string> = new Map();
     public items: Map<number, string> = new Map();
     public forms: Map<string, string> = new Map(); 
     public balls: Map<number, number> = new Map(); 
 
-    // Message Data [FileName (lowercase) -> [Label (lowercase) -> Text]]
     public messages: Map<string, Map<string, string>> = new Map();
 
-    // Event Emitter for Live Updates
     public readonly onHintsChangedEmitter = new vscode.EventEmitter<void>();
 
     private static instance: DataManager;
@@ -78,44 +73,33 @@ export class DataManager {
         const rootPath = folders[0].uri.fsPath;
         const jsonDir = path.join(rootPath, 'JSON');
 
-        // 1. Load Definitions
         this.loadGeneric(path.join(jsonDir, 'commands.json'), this.commands, 'Name');
         this.loadGeneric(path.join(jsonDir, 'hints.json'), this.hints, 'Cmd');
         this.loadGeneric(path.join(jsonDir, 'flags.json'), this.flags, 'Name');
         this.loadGeneric(path.join(jsonDir, 'sys_flags.json'), this.sysFlags, 'Name');
         this.loadGeneric(path.join(jsonDir, 'work.json'), this.works, 'Name');
 
-        // 2. Load Assets & Messages
         await this.loadGameAssets(rootPath);
     }
 
     private async loadGameAssets(rootPath: string) {
         const assetsPath = path.join(rootPath, 'Assets');
         const englishPath = path.join(assetsPath, 'format_msbt', 'en', 'english');
-        
-        // Search path: Look in specific english folder, fallback to Assets root
         const searchPath = fs.existsSync(englishPath) ? englishPath : assetsPath;
 
         if (fs.existsSync(searchPath)) {
-            // Find all .asset files
             const files = await vscode.workspace.findFiles(new vscode.RelativePattern(searchPath, '**/*.asset'));
-
             for (const file of files) {
                 const fileName = path.basename(file.fsPath, '.asset');
-
-                // 1. Parse Game Data (Pokemon/Items/Forms)
                 if (fileName.includes('monsname')) this.parseUnityAsset(file.fsPath, this.pokes);
                 else if (fileName.includes('itemname')) this.parseUnityAsset(file.fsPath, this.items);
                 else if (fileName.includes('zkn_form')) this.parseUnityFormAsset(file.fsPath, this.forms);
-                
-                // 2. Parse Messages (Skip known non-message files)
                 else if (!fileName.includes('UIDatabase')) {
                     await this.parseMessageAsset(file.fsPath, fileName);
                 }
             }
         }
 
-        // Load UIDatabase
         const uiDbPath = path.join(assetsPath, 'masterdatas', 'UIDatabase.asset');
         if (fs.existsSync(uiDbPath)) {
             this.parseUIDatabase(uiDbPath, this.balls);
@@ -124,56 +108,80 @@ export class DataManager {
         console.log(`[DataManager] Loaded ${this.messages.size} message files.`);
     }
 
-    // --- UNITY ASSET PARSERS ---
-
-    // Parses english_*.asset files for Messages
     private async parseMessageAsset(filePath: string, fileName: string) {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
             if (!content.includes('labelDataArray')) return;
 
-            // Determine logical names
             const rawName = fileName;
             const shortName = rawName.replace(/^english_/, '').replace(/^ss_/, '');
-            
             const labelMap = new Map<string, string>();
-
             const lines = content.split(/\r?\n/);
             
             let inLabelArray = false;
             let currentLabel = "";
             let currentFullText = ""; 
             
+            // Temporary Parser State
             let wordStr: string | null = null;
             let wordEventID: number | null = null;
+            let wordTagIndex: number = -1;
+            
+            // --- UPDATED: Tag Map Stores Group ID ---
+            // List of { globalIndex, groupID }
+            let currentLabelTags: { id: number, group: number }[] = []; 
+            let tempTagIndexValue: number = -1;
+            let tempGroupIDValue: number = 1; // Default to 1 (Name)
+
+            let inTagData = false;
             let inWordData = false;
 
             const commitWord = () => {
                 if (wordStr !== null) {
                     currentFullText += wordStr;
-                    if (wordEventID !== null) {
-                        if (wordEventID === 1) currentFullText += "{n}";
-                        else if (wordEventID === 3) currentFullText += "{r}";
-                        else if (wordEventID === 4) currentFullText += "{f}";
-                        else if (wordEventID === 0 || wordEventID === 2 || wordEventID >= 5) { /* No op */ }
-                        else currentFullText += "{n}";
+                }
+                
+                if (wordTagIndex !== -1) {
+                    // Check if we have a mapping
+                    if (wordTagIndex < currentLabelTags.length) {
+                        const tagDef = currentLabelTags[wordTagIndex];
+                        // ENCODE FORMAT: {Index:Group} -> {0:2}
+                        currentFullText += `{${tagDef.id}:${tagDef.group}}`;
                     } else {
-                        // Default behavior if no ID is provided: Newline
-                        currentFullText += "{n}";
+                        // Fallback (assume Group 1)
+                        currentFullText += `{${wordTagIndex}:1}`;
                     }
                 }
+
+                if (wordEventID !== null) {
+                    if (wordEventID === 1) currentFullText += "{n}";
+                    else if (wordEventID === 3) currentFullText += "{r}";
+                    else if (wordEventID === 4) currentFullText += "{f}";
+                    else if (wordEventID === 0 || wordEventID === 2 || wordEventID >= 5) { /* No op */ }
+                    else currentFullText += "{n}";
+                }
+                
                 wordStr = null;
                 wordEventID = null;
+                wordTagIndex = -1;
+            };
+
+            const resetLabelState = () => {
+                currentFullText = "";
+                wordStr = null;
+                wordEventID = null;
+                wordTagIndex = -1;
+                currentLabelTags = []; 
+                inTagData = false;
+                inWordData = false;
+                tempTagIndexValue = -1;
+                tempGroupIDValue = 1;
             };
 
             for (let i = 0; i < lines.length; i++) {
                 const rawLine = lines[i];
                 const trimmed = rawLine.trim();
-                
-                // DETECT LIST ITEM DASH
                 const isNewItem = rawLine.trimStart().startsWith("-");
-                
-                // Clean the line
                 const cleanLine = trimmed.replace(/^- /, ''); 
 
                 if (cleanLine.startsWith("labelDataArray:")) {
@@ -183,38 +191,58 @@ export class DataManager {
 
                 if (inLabelArray) {
                     if (cleanLine.startsWith("labelName:")) {
-                        commitWord(); // Commit pending word from previous label
-                        
-                        // Save previous label
+                        commitWord(); 
                         if (currentLabel && currentFullText) {
                             labelMap.set(currentLabel.toLowerCase(), currentFullText);
                         }
-                        
-                        // Start new label
                         currentLabel = cleanLine.substring("labelName:".length).trim();
-                        currentFullText = "";
-                        wordStr = null;
-                        wordEventID = null;
+                        resetLabelState();
+                    }
+                    
+                    else if (cleanLine.startsWith("tagDataArray:")) {
+                        inTagData = true;
                         inWordData = false;
                     }
-                    else if (cleanLine.startsWith("wordDataArray:")) {
-                        inWordData = true;
+                    else if (inTagData) {
+                        if (cleanLine.startsWith("wordDataArray:")) {
+                            if (tempTagIndexValue !== -1) {
+                                currentLabelTags.push({ id: tempTagIndexValue, group: tempGroupIDValue });
+                                tempTagIndexValue = -1;
+                                tempGroupIDValue = 1;
+                            }
+                            inTagData = false;
+                            inWordData = true;
+                        } 
+                        else if (cleanLine.startsWith("labelName:")) {
+                            inTagData = false;
+                            i--; continue;
+                        }
+                        else {
+                            if (isNewItem && tempTagIndexValue !== -1) {
+                                currentLabelTags.push({ id: tempTagIndexValue, group: tempGroupIDValue });
+                                tempTagIndexValue = -1;
+                                tempGroupIDValue = 1;
+                            }
+                            if (cleanLine.startsWith("tagIndex:")) {
+                                const val = cleanLine.substring("tagIndex:".length).trim();
+                                const id = parseInt(val);
+                                if (!isNaN(id)) tempTagIndexValue = id;
+                            }
+                            // NEW: Capture Group ID
+                            else if (cleanLine.startsWith("groupID:")) {
+                                const val = cleanLine.substring("groupID:".length).trim();
+                                const id = parseInt(val);
+                                if (!isNaN(id)) tempGroupIDValue = id;
+                            }
+                        }
                     }
+
                     else if (inWordData) {
-                        // Check if we exited wordDataArray (by seeing a new property like arrayIndex at root level)
-                        // However, arrayIndex is usually part of the list item.
-                        // We rely on isNewItem to trigger commits.
-                        
                         if (cleanLine.startsWith("labelName:")) {
                             inWordData = false;
-                            i--; // Re-process this line
-                            continue;
+                            i--; continue;
                         }
-
-                        // If a line starts with "- ", it is the start of a NEW word object
-                        if (isNewItem) {
-                            commitWord();
-                        }
+                        if (isNewItem) commitWord();
 
                         if (cleanLine.startsWith("str:")) {
                             let val = cleanLine.substring("str:".length).trim();
@@ -226,10 +254,14 @@ export class DataManager {
                             const id = parseInt(val);
                             if (!isNaN(id)) wordEventID = id;
                         }
+                        else if (cleanLine.startsWith("tagIndex:")) {
+                            const val = cleanLine.substring("tagIndex:".length).trim();
+                            const id = parseInt(val);
+                            if (!isNaN(id)) wordTagIndex = id;
+                        }
                     }
                 }
             }
-            // Final Commit
             commitWord();
             if (currentLabel && currentFullText) {
                 labelMap.set(currentLabel.toLowerCase(), currentFullText);
