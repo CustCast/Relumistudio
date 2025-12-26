@@ -30,6 +30,12 @@ export class MessagePreviewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    public navigate(direction: 'prev' | 'next') {
+        if (this._view) {
+            this._view.webview.postMessage({ type: 'navigation', direction: direction });
+        }
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         // Construct paths
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'messageRenderer.js'));

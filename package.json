@@ -62,14 +62,16 @@
       "relumi-sidebar": [
         {
           "id": "relumi-scripts",
-          "name": "Script Explorer"
+          "name": "Script Explorer",
+          "icon": "$(list-tree)"
         }
       ],
       "relumi-tools": [
         {
           "id": "relumi-message-preview",
           "name": "Message Preview",
-          "type": "webview"
+          "type": "webview",
+          "icon": "$(eye)"
         }
       ]
     },
@@ -88,6 +90,30 @@
         "command": "relumistudio.openAnalysis",
         "title": "ReLumiStudio: Analyze Project",
         "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.navMessagePrev",
+        "title": "Message Preview: Previous Page",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.navMessageNext",
+        "title": "Message Preview: Next Page",
+        "category": "ReLumiStudio"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "relumistudio.navMessagePrev",
+        "key": "alt+left",
+        "mac": "alt+left",
+        "when": "editorTextFocus && resourceLangId == bdsp"
+      },
+      {
+        "command": "relumistudio.navMessageNext",
+        "key": "alt+right",
+        "mac": "alt+right",
+        "when": "editorTextFocus && resourceLangId == bdsp"
       }
     ],
     "menus": {

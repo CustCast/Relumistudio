@@ -141,12 +141,21 @@ export function activate(context: vscode.ExtensionContext) {
                 messageProvider.updateMessage(finalMessage);
             }
             else {
+                // Fallback: Check for simple string literal under cursor
                 const simpleMatch = lineText.match(/'([^']*)'/);
+                let showedString = false;
+
                 if (simpleMatch) {
                     const idx = lineText.indexOf(simpleMatch[0]);
                     if (position.character >= idx && position.character <= idx + simpleMatch[0].length) {
                         messageProvider.updateMessage(simpleMatch[1]);
+                        showedString = true;
                     }
+                }
+                
+                // If no message found and not in a string, blank out the preview
+                if (!showedString) {
+                    messageProvider.updateMessage("");
                 }
             }
         })
@@ -163,6 +172,13 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('relumistudio.openAnalysis', () => {
             AnalysisPanel.createOrShow(context.extensionUri);
+        }),
+        // Message Preview Navigation Commands
+        vscode.commands.registerCommand('relumistudio.navMessagePrev', () => {
+            messageProvider.navigate('prev');
+        }),
+        vscode.commands.registerCommand('relumistudio.navMessageNext', () => {
+            messageProvider.navigate('next');
         })
     );
 }

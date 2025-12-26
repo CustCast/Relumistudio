@@ -150,6 +150,31 @@
             currentPages = splitIntoPages(rawText);
             pageIndex = 0;
             if (assetsLoaded) draw();
+        } 
+        else if (e.data.type === 'navigation') {
+            if (e.data.direction === 'prev') {
+                if (pageIndex > 0) { pageIndex--; draw(); }
+            } 
+            else if (e.data.direction === 'next') {
+                if (pageIndex < currentPages.length - 1) { pageIndex++; draw(); }
+            }
+        }
+    });
+
+    // Keyboard Navigation (When webview is focused)
+    window.addEventListener('keydown', e => {
+        if (e.altKey) {
+            if (e.key === 'ArrowLeft') {
+                if (pageIndex > 0) {
+                    pageIndex--;
+                    draw();
+                }
+            } else if (e.key === 'ArrowRight') {
+                if (pageIndex < currentPages.length - 1) {
+                    pageIndex++;
+                    draw();
+                }
+            }
         }
     });
 
