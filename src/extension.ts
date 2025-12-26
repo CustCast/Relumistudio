@@ -14,8 +14,6 @@ import { ScriptTracer } from './tracer';
 export function activate(context: vscode.ExtensionContext) {
     console.log('ReLumiStudio is active!');
 
-    DataManager.getInstance().loadData();
-
     // 1. Initialize Indexer & Tracer
     const indexer = new ScriptIndexer();
     indexer.refreshIndex(); 
@@ -66,100 +64,116 @@ export function activate(context: vscode.ExtensionContext) {
 
     DataManager.getInstance().onHintsChangedEmitter.event(() => updateDecos(vscode.window.activeTextEditor));
 
-    // --- MESSAGE PREVIEW SYNC ---
+    // --- Message Preview Update Logic ---
+    const triggerMessageUpdate = async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'bdsp') return;
+        
+        const position = editor.selection.active;
+        const document = editor.document;
+        const lineText = document.lineAt(position.line).text;
+
+        // Hint Editor Sync
+        if (HintEditorPanel.currentPanel) {
+            const range = document.getWordRangeAtPosition(position);
+            if (range) {
+                const word = document.getText(range);
+                if (DataManager.getInstance().commands.has(word)) {
+                    HintEditorPanel.currentPanel.selectCommand(word);
+                }
+            }
+        }
+
+        // Message Preview Sync
+        const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
+        const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
+
+        let rawMessage: string | null = null;
+        let currentLabel: string | null = null;
+
+        if (macroMatch) {
+            rawMessage = macroMatch[3];
+            currentLabel = macroMatch[2];
+        } 
+        else if (stdMatch) {
+            const fileName = stdMatch[1];
+            const label = stdMatch[2];
+            rawMessage = DataManager.getInstance().getMessage(fileName, label);
+            currentLabel = label;
+            
+            if (!rawMessage) {
+                // messageProvider.updateMessage(`[ERROR] Message not found!`);
+                // Silently fail or clear if strictly no match found
+                return;
+            }
+        } 
+
+        // --- Dynamic Placeholders ---
+        if (rawMessage) {
+            const placeholderRegex = /\{(\d+)(?::(\d+))?\}/g;
+            let finalMessage = rawMessage;
+            let match;
+
+            const replacements = new Map<string, string>();
+
+            while ((match = placeholderRegex.exec(rawMessage)) !== null) {
+                const fullMatch = match[0];
+                const tagIndex = parseInt(match[1]);
+                const groupID = match[2] ? parseInt(match[2]) : 1; 
+
+                if (!replacements.has(fullMatch)) {
+                    const resolvedCmd = await tracer.resolveTagIndex(document, position.line, tagIndex, groupID);
+                    
+                    if (resolvedCmd) {
+                        replacements.set(fullMatch, resolvedCmd); 
+                    } else {
+                        replacements.set(fullMatch, `{${tagIndex}}`);
+                    }
+                }
+            }
+
+            replacements.forEach((val, key) => {
+                finalMessage = finalMessage.split(key).join(val);
+            });
+
+            // Fetch speaker name if we have a label
+            let speakerName: string | null = null;
+            if (currentLabel) {
+                speakerName = DataManager.getInstance().getSpeaker(currentLabel);
+                // DEBUG LOG
+                console.log(`[Extension] Label: ${currentLabel} -> Speaker: ${speakerName}`);
+            }
+
+            messageProvider.updateMessage(finalMessage, speakerName);
+        }
+        else {
+            const simpleMatch = lineText.match(/'([^']*)'/);
+            let showedString = false;
+
+            if (simpleMatch) {
+                const idx = lineText.indexOf(simpleMatch[0]);
+                if (position.character >= idx && position.character <= idx + simpleMatch[0].length) {
+                    messageProvider.updateMessage(simpleMatch[1]);
+                    showedString = true;
+                }
+            }
+            
+            if (!showedString) {
+                messageProvider.updateMessage("");
+            }
+        }
+    };
+
+    // Events
     context.subscriptions.push(
-        vscode.window.onDidChangeTextEditorSelection(async e => { 
-            if (e.textEditor.document.languageId !== 'bdsp') return;
-
-            const position = e.selections[0].active;
-            const document = e.textEditor.document;
-            const lineText = document.lineAt(position.line).text;
-
-            // Hint Editor Sync
-            if (HintEditorPanel.currentPanel) {
-                const range = document.getWordRangeAtPosition(position);
-                if (range) {
-                    const word = document.getText(range);
-                    if (DataManager.getInstance().commands.has(word)) {
-                        HintEditorPanel.currentPanel.selectCommand(word);
-                    }
-                }
-            }
-
-            // Message Preview Sync
-            const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
-            const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
-
-            let rawMessage: string | null = null;
-
-            if (macroMatch) {
-                rawMessage = macroMatch[3];
-            } 
-            else if (stdMatch) {
-                const fileName = stdMatch[1];
-                const label = stdMatch[2];
-                rawMessage = DataManager.getInstance().getMessage(fileName, label);
-                
-                if (!rawMessage) {
-                    messageProvider.updateMessage(`[ERROR] Message not found!\nFile: ${fileName}\nLabel: ${label}`);
-                    return;
-                }
-            } 
-
-            // --- Dynamic Placeholders ---
-            if (rawMessage) {
-                // Regex matches {Index} OR {Index:Group}
-                // Examples: {0}, {0:2}
-                const placeholderRegex = /\{(\d+)(?::(\d+))?\}/g;
-                let finalMessage = rawMessage;
-                let match;
-
-                const replacements = new Map<string, string>();
-
-                while ((match = placeholderRegex.exec(rawMessage)) !== null) {
-                    const fullMatch = match[0];       // "{0:2}"
-                    const tagIndex = parseInt(match[1]); // 0
-                    const groupID = match[2] ? parseInt(match[2]) : 1; // 2 (Default to 1 if missing)
-
-                    if (!replacements.has(fullMatch)) {
-                        // Pass Group ID to Tracer
-                        const resolvedCmd = await tracer.resolveTagIndex(document, position.line, tagIndex, groupID);
-                        
-                        if (resolvedCmd) {
-                            replacements.set(fullMatch, resolvedCmd); 
-                        } else {
-                            // Cleanup: Show just {0} if trace failed, remove the :2 part
-                            replacements.set(fullMatch, `{${tagIndex}}`);
-                        }
-                    }
-                }
-
-                replacements.forEach((val, key) => {
-                    finalMessage = finalMessage.split(key).join(val);
-                });
-
-                messageProvider.updateMessage(finalMessage);
-            }
-            else {
-                // Fallback: Check for simple string literal under cursor
-                const simpleMatch = lineText.match(/'([^']*)'/);
-                let showedString = false;
-
-                if (simpleMatch) {
-                    const idx = lineText.indexOf(simpleMatch[0]);
-                    if (position.character >= idx && position.character <= idx + simpleMatch[0].length) {
-                        messageProvider.updateMessage(simpleMatch[1]);
-                        showedString = true;
-                    }
-                }
-                
-                // If no message found and not in a string, blank out the preview
-                if (!showedString) {
-                    messageProvider.updateMessage("");
-                }
-            }
-        })
+        vscode.window.onDidChangeTextEditorSelection(triggerMessageUpdate)
     );
+    
+    // Auto-refresh when data loads
+    DataManager.getInstance().onDataLoadedEmitter.event(() => {
+        console.log('Data loaded, refreshing preview...');
+        triggerMessageUpdate();
+    });
 
     // Commands
     context.subscriptions.push(
@@ -173,7 +187,6 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('relumistudio.openAnalysis', () => {
             AnalysisPanel.createOrShow(context.extensionUri);
         }),
-        // Message Preview Navigation Commands
         vscode.commands.registerCommand('relumistudio.navMessagePrev', () => {
             messageProvider.navigate('prev');
         }),
@@ -181,6 +194,9 @@ export function activate(context: vscode.ExtensionContext) {
             messageProvider.navigate('next');
         })
     );
+
+    // Initial Load
+    DataManager.getInstance().loadData();
 }
 
 export function deactivate() {}

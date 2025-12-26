@@ -6,6 +6,7 @@
     const arrowPrev = document.getElementById('arrowPrev');
     const arrowNext = document.getElementById('arrowNext');
     const lblPage = document.getElementById('pageIndicator');
+    const lblSpeaker = document.getElementById('speakerBubble');
 
     // --- State ---
     let atlasMap = null;
@@ -129,7 +130,6 @@
 
     // --- UI Handlers ---
     
-    // Attach to arrows instead of buttons
     arrowPrev.onclick = () => { 
         if (pageIndex > 0) { 
             pageIndex--; 
@@ -147,6 +147,18 @@
     window.addEventListener('message', e => {
         if (e.data.type === 'updateText') {
             const rawText = e.data.text;
+            
+            // Handle Speaker
+            // DEBUG LOG
+            // console.log("Received speaker data:", e.data.speaker);
+
+            if (e.data.speaker && e.data.speaker.trim().length > 0) {
+                lblSpeaker.innerText = e.data.speaker;
+                lblSpeaker.style.display = 'block';
+            } else {
+                lblSpeaker.style.display = 'none';
+            }
+
             currentPages = splitIntoPages(rawText);
             pageIndex = 0;
             if (assetsLoaded) draw();
@@ -161,7 +173,7 @@
         }
     });
 
-    // Keyboard Navigation (When webview is focused)
+    // Keyboard Navigation
     window.addEventListener('keydown', e => {
         if (e.altKey) {
             if (e.key === 'ArrowLeft') {
@@ -257,14 +269,11 @@
 
     function draw() {
         // Update Overlays
-        // Page format: "1/2"
         lblPage.innerText = `${pageIndex + 1}/${currentPages.length}`;
         
-        // Arrow Visibility Logic
         arrowPrev.style.display = (pageIndex > 0) ? 'block' : 'none';
         arrowNext.style.display = (pageIndex < currentPages.length - 1) ? 'block' : 'none';
 
-        // Reset Canvas
         canvas.width = CANVAS_WIDTH;
         canvas.height = CANVAS_HEIGHT;
 

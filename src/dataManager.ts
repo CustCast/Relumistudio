@@ -53,10 +53,14 @@ export class DataManager {
     public items: Map<number, string> = new Map();
     public forms: Map<string, string> = new Map(); 
     public balls: Map<number, number> = new Map(); 
+    
+    // Mapping: MessageLabel (lowercase) -> SpeakerLabel (e.g. DLP_SPEAKERS_NAME_OAK)
+    public msgWindowData: Map<string, string> = new Map();
 
     public messages: Map<string, Map<string, string>> = new Map();
 
     public readonly onHintsChangedEmitter = new vscode.EventEmitter<void>();
+    public readonly onDataLoadedEmitter = new vscode.EventEmitter<void>();
 
     private static instance: DataManager;
     private constructor() {}
@@ -67,6 +71,7 @@ export class DataManager {
     }
 
     public async loadData() {
+        console.log('[DataManager] Starting data load...');
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) return;
 
@@ -80,58 +85,88 @@ export class DataManager {
         this.loadGeneric(path.join(jsonDir, 'work.json'), this.works, 'Name');
 
         await this.loadGameAssets(rootPath);
+        
+        console.log('[DataManager] Data load complete. Firing event.');
+        this.onDataLoadedEmitter.fire();
     }
 
     private async loadGameAssets(rootPath: string) {
         const assetsPath = path.join(rootPath, 'Assets');
+        
+        // 1. Scan English Message Files
         const englishPath = path.join(assetsPath, 'format_msbt', 'en', 'english');
-        const searchPath = fs.existsSync(englishPath) ? englishPath : assetsPath;
-
-        if (fs.existsSync(searchPath)) {
-            const files = await vscode.workspace.findFiles(new vscode.RelativePattern(searchPath, '**/*.asset'));
+        console.log(`[DataManager] Scanning for messages in: ${englishPath}`);
+        
+        if (fs.existsSync(englishPath)) {
+            const files = await vscode.workspace.findFiles(new vscode.RelativePattern(englishPath, '**/*.asset'));
+            console.log(`[DataManager] Found ${files.length} asset files in english folder.`);
+            
             for (const file of files) {
                 const fileName = path.basename(file.fsPath, '.asset');
                 if (fileName.includes('monsname')) this.parseUnityAsset(file.fsPath, this.pokes);
                 else if (fileName.includes('itemname')) this.parseUnityAsset(file.fsPath, this.items);
                 else if (fileName.includes('zkn_form')) this.parseUnityFormAsset(file.fsPath, this.forms);
                 else if (!fileName.includes('UIDatabase')) {
+                    if (fileName.includes('dlp_speakers_name') || fileName.includes('dlp_speaker_name')) {
+                        console.log(`[DataManager] Found speaker file: ${fileName}`);
+                    }
                     await this.parseMessageAsset(file.fsPath, fileName);
                 }
             }
+        } else {
+            console.warn(`[DataManager] English message folder NOT FOUND at: ${englishPath}`);
         }
 
+        // 2. Load MsgWindowData
+        const msgWindowPath = path.join(assetsPath, 'md', 'msgwindowdata', 'MsgWindowData.asset');
+        if (fs.existsSync(msgWindowPath)) {
+            console.log(`[DataManager] Loading MsgWindowData from: ${msgWindowPath}`);
+            this.parseMsgWindowData(msgWindowPath);
+        } else {
+            console.warn(`[DataManager] MsgWindowData.asset NOT FOUND at: ${msgWindowPath}. Attempting search...`);
+            const msgWindowFiles = await vscode.workspace.findFiles('**/MsgWindowData.asset');
+            if (msgWindowFiles.length > 0) {
+                 console.log(`[DataManager] Fallback: Found MsgWindowData at ${msgWindowFiles[0].fsPath}`);
+                 this.parseMsgWindowData(msgWindowFiles[0].fsPath);
+            } else {
+                console.error('[DataManager] Could not find MsgWindowData.asset anywhere!');
+            }
+        }
+
+        // 3. UI Database
         const uiDbPath = path.join(assetsPath, 'masterdatas', 'UIDatabase.asset');
         if (fs.existsSync(uiDbPath)) {
             this.parseUIDatabase(uiDbPath, this.balls);
         }
         
-        console.log(`[DataManager] Loaded ${this.messages.size} message files.`);
+        console.log(`[DataManager] Final Stats: ${this.messages.size} message files, ${this.msgWindowData.size} speaker mappings.`);
     }
 
     private async parseMessageAsset(filePath: string, fileName: string) {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
-            if (!content.includes('labelDataArray')) return;
+            
+            const isSpeakerFile = fileName.includes('dlp_speakers_name') || fileName.includes('dlp_speaker_name');
+            
+            if (!content.includes('labelDataArray') && !isSpeakerFile) return;
 
             const rawName = fileName;
             const shortName = rawName.replace(/^english_/, '').replace(/^ss_/, '');
             const labelMap = new Map<string, string>();
             const lines = content.split(/\r?\n/);
             
-            let inLabelArray = false;
+            let inLabelArray = isSpeakerFile; 
+            
             let currentLabel = "";
             let currentFullText = ""; 
             
-            // Temporary Parser State
             let wordStr: string | null = null;
             let wordEventID: number | null = null;
             let wordTagIndex: number = -1;
             
-            // --- UPDATED: Tag Map Stores Group ID ---
-            // List of { globalIndex, groupID }
             let currentLabelTags: { id: number, group: number }[] = []; 
             let tempTagIndexValue: number = -1;
-            let tempGroupIDValue: number = 1; // Default to 1 (Name)
+            let tempGroupIDValue: number = 1;
 
             let inTagData = false;
             let inWordData = false;
@@ -142,13 +177,10 @@ export class DataManager {
                 }
                 
                 if (wordTagIndex !== -1) {
-                    // Check if we have a mapping
                     if (wordTagIndex < currentLabelTags.length) {
                         const tagDef = currentLabelTags[wordTagIndex];
-                        // ENCODE FORMAT: {Index:Group} -> {0:2}
                         currentFullText += `{${tagDef.id}:${tagDef.group}}`;
                     } else {
-                        // Fallback (assume Group 1)
                         currentFullText += `{${wordTagIndex}:1}`;
                     }
                 }
@@ -195,7 +227,12 @@ export class DataManager {
                         if (currentLabel && currentFullText) {
                             labelMap.set(currentLabel.toLowerCase(), currentFullText);
                         }
-                        currentLabel = cleanLine.substring("labelName:".length).trim();
+                        const match = cleanLine.match(/labelName:\s*(.+)/);
+                        if (match) {
+                            currentLabel = match[1].trim();
+                        } else {
+                            currentLabel = cleanLine.substring("labelName:".length).trim();
+                        }
                         resetLabelState();
                     }
                     
@@ -228,7 +265,6 @@ export class DataManager {
                                 const id = parseInt(val);
                                 if (!isNaN(id)) tempTagIndexValue = id;
                             }
-                            // NEW: Capture Group ID
                             else if (cleanLine.startsWith("groupID:")) {
                                 const val = cleanLine.substring("groupID:".length).trim();
                                 const id = parseInt(val);
@@ -245,9 +281,12 @@ export class DataManager {
                         if (isNewItem) commitWord();
 
                         if (cleanLine.startsWith("str:")) {
-                            let val = cleanLine.substring("str:".length).trim();
-                            if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
-                            wordStr = val;
+                            const match = cleanLine.match(/str:\s*(.+)/);
+                            if (match) {
+                                let val = match[1].trim();
+                                if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+                                wordStr = val;
+                            }
                         }
                         else if (cleanLine.startsWith("eventID:")) {
                             const val = cleanLine.substring("eventID:".length).trim();
@@ -265,6 +304,10 @@ export class DataManager {
             commitWord();
             if (currentLabel && currentFullText) {
                 labelMap.set(currentLabel.toLowerCase(), currentFullText);
+            }
+
+            if (isSpeakerFile) {
+                console.log(`[DataManager] Parsed speaker file: ${fileName}. Entries: ${labelMap.size}`);
             }
 
             this.messages.set(rawName.toLowerCase(), labelMap);
@@ -309,6 +352,48 @@ export class DataManager {
         }
     }
 
+    private parseMsgWindowData(filePath: string) {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split(/\r?\n/);
+            let currentLabel: string | null = null;
+            let count = 0;
+            
+            // FIX: Added ^ anchors to prevent "talk_label" from matching "label"
+            const labelRegex = /^(?:- )?(?:label|labelName)\s*:\s*(.+)/i;
+            const talkRegex = /^(?:talk_label|talkLabel)\s*:\s*(.+)/i;
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                
+                // 1. Find Label
+                const labelMatch = trimmed.match(labelRegex);
+                if (labelMatch) {
+                    let val = labelMatch[1].trim();
+                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
+                        val = val.slice(1, -1);
+                    }
+                    currentLabel = val;
+                }
+                
+                // 2. Find Talk Label (Speaker)
+                const talkMatch = trimmed.match(talkRegex);
+                if (talkMatch && currentLabel) {
+                    let val = talkMatch[1].trim();
+                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
+                        val = val.slice(1, -1);
+                    }
+                    this.msgWindowData.set(currentLabel.toLowerCase(), val);
+                    count++;
+                }
+            }
+            console.log(`[DataManager] Parsed MsgWindowData. Mapped ${count} labels to speakers.`);
+            
+        } catch (e) {
+            console.error("Error parsing MsgWindowData", e);
+        }
+    }
+
     private loadGeneric(filePath: string, map: Map<string, any>, keyProp: string) {
         if (fs.existsSync(filePath)) {
             try {
@@ -328,6 +413,30 @@ export class DataManager {
             return fileData.get(cleanLabel)!;
         }
         return null;
+    }
+
+    public getSpeaker(messageLabel: string): string | null {
+        const speakerLabel = this.msgWindowData.get(messageLabel.toLowerCase());
+        
+        if (!speakerLabel) return null;
+
+        const possibleKeys = [
+            'dlp_speakers_name',
+            'english_dlp_speakers_name',
+            'dlp_speaker_name',
+            'english_dlp_speaker_name'
+        ];
+
+        for (const key of possibleKeys) {
+            const fileData = this.messages.get(key);
+            if (fileData) {
+                if (fileData.has(speakerLabel.toLowerCase())) {
+                    return fileData.get(speakerLabel.toLowerCase())!;
+                }
+            }
+        }
+        
+        return speakerLabel;
     }
 
     public updateHintCache(newHints: HintConfig[]) { newHints.forEach(h => this.hints.set(h.Cmd, h)); this.onHintsChangedEmitter.fire(); }

@@ -24,9 +24,9 @@ export class MessagePreviewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
     }
 
-    public updateMessage(text: string) {
+    public updateMessage(text: string, speaker: string | null = null) {
         if (this._view) {
-            this._view.webview.postMessage({ type: 'updateText', text: text });
+            this._view.webview.postMessage({ type: 'updateText', text: text, speaker: speaker });
         }
     }
 
@@ -65,6 +65,7 @@ export class MessagePreviewProvider implements vscode.WebviewViewProvider {
                 <div id="arrowPrev" class="nav-arrow left">◀</div>
                 <div id="arrowNext" class="nav-arrow right">▶</div>
                 <div id="pageIndicator" class="page-overlay">1/1</div>
+                <div id="speakerBubble" class="speaker-bubble">Speaker</div>
                 
                 <canvas id="messageCanvas" width="1500" height="230"></canvas>
             </div>
