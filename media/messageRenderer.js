@@ -149,9 +149,6 @@
             const rawText = e.data.text;
             
             // Handle Speaker
-            // DEBUG LOG
-            // console.log("Received speaker data:", e.data.speaker);
-
             if (e.data.speaker && e.data.speaker.trim().length > 0) {
                 lblSpeaker.innerText = e.data.speaker;
                 lblSpeaker.style.display = 'block';

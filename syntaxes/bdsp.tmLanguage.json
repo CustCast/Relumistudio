@@ -1,115 +1,105 @@
 {
-	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-	"name": "RelumiScript",
-	"scopeName": "source.bdsp",
-	"patterns": [
-		{
-			"include": "#labels"
-		},
-		{
-			"include": "#comments"
-		}
-	],
-	"repository": {
-		"labels": {
-			"patterns": [
-				{
-					"begin": "^\\s*([a-zA-Z0-9_]+)(:)",
-					"beginCaptures": {
-						"1": {
-							"name": "entity.name.function.bdsp"
-						},
-						"2": {
-							"name": "punctuation.separator.key-value.bdsp"
-						}
-					},
-					"while": "^(\\t| {1,4})(.*)",
-					"whileCaptures": {
-						"2": {
-							"patterns": [
-								{
-									"include": "#commands"
-								},
-								{
-									"include": "#comments"
-								}
-							]
-						}
-					}
-				}
-			]
-		},
-		"commands": {
-			"patterns": [
-				{
-					"begin": "\\b([A-Z_][A-Z0-9_]*)\\b\\s*(\\()",
-					"beginCaptures": {
-						"1": {
-							"name": "keyword.control.bdsp"
-						},
-						"2": {
-							"name": "punctuation.parenthesis.begin.bdsp"
-						}
-					},
-					"end": "\\)",
-					"endCaptures": {
-						"0": {
-							"name": "punctuation.parenthesis.end.bdsp"
-						}
-					},
-					"patterns": [
-						{
-							"include": "#strings"
-						},
-						{
-							"include": "#arguments"
-						},
-						{
-							"match": ",",
-							"name": "punctuation.separator.delimiter.bdsp"
-						}
-					]
-				}
-			]
-		},
-		"arguments": {
-			"patterns": [
-				{
-					"match": "#[A-Za-z0-9_\\-]+",
-					"name": "constant.language.bdsp"
-				},
-				{
-					"match": "\\$[A-Za-z0-9_\\-]+",
-					"name": "variable.language.bdsp"
-				},
-				{
-					"match": "@[A-Za-z0-9_\\-]+",
-					"name": "variable.parameter.bdsp"
-				},
-				{
-					"match": "\\b\\d+(\\.\\d+)?\\b",
-					"name": "constant.numeric.bdsp"
-				}
-			]
-		},
-		"strings": {
-			"name": "string.quoted.single.bdsp",
-			"begin": "'",
-			"end": "'",
-			"patterns": [
-				{
-					"match": "\\\\.",
-					"name": "constant.character.escape.bdsp"
-				}
-			]
-		},
-		"comments": {
-			"patterns": [
-				{
-					"name": "comment.line.semicolon.bdsp",
-					"match": ";.*$"
-				}
-			]
-		}
-	}
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "RelumiScript",
+    "scopeName": "source.bdsp",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#labels"
+        },
+        {
+            "include": "#commands"
+        }
+    ],
+    "repository": {
+        "labels": {
+            "patterns": [
+                {
+                    "match": "^\\s*([a-zA-Z0-9_]+)(:)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.bdsp"
+                        },
+                        "2": {
+                            "name": "punctuation.separator.key-value.bdsp"
+                        }
+                    }
+                }
+            ]
+        },
+        "commands": {
+            "patterns": [
+                {
+                    "begin": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b\\s*(\\()",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.control.bdsp"
+                        },
+                        "2": {
+                            "name": "punctuation.parenthesis.begin.bdsp"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.parenthesis.end.bdsp"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#strings"
+                        },
+                        {
+                            "include": "#arguments"
+                        },
+                        {
+                            "match": ",",
+                            "name": "punctuation.separator.delimiter.bdsp"
+                        }
+                    ]
+                }
+            ]
+        },
+        "arguments": {
+            "patterns": [
+                {
+                    "match": "#[A-Za-z0-9_\\-]+",
+                    "name": "constant.language.flag.bdsp"
+                },
+                {
+                    "match": "\\$[A-Za-z0-9_\\-]+",
+                    "name": "constant.language.sysflag.bdsp"
+                },
+                {
+                    "match": "@[A-Za-z0-9_\\-]+",
+                    "name": "variable.parameter.bdsp"
+                },
+                {
+                    "match": "\\b\\d+(\\.\\d+)?\\b",
+                    "name": "constant.numeric.bdsp"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.single.bdsp",
+            "begin": "'",
+            "end": "'",
+            "patterns": [
+                {
+                    "match": "\\\\.",
+                    "name": "constant.character.escape.bdsp"
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.semicolon.bdsp",
+                    "match": ";.*$"
+                }
+            ]
+        }
+    }
 }

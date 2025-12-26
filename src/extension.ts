@@ -1,43 +1,49 @@
 import * as vscode from 'vscode';
 import { DataManager } from './dataManager';
-import { ScriptTreeProvider } from './scriptTreeProvider';
+import { RelumiExplorerProvider } from './explorerProvider';
 import { BDSPHoverProvider } from './hoverProvider';
 import { HintEditorPanel } from './panels/HintEditorPanel';
 import { BDSPCompletionProvider } from './completionProvider';
 import { BDSPNavigationProvider } from './navigationProvider';
-import { AnalysisPanel } from './panels/AnalysisPanel';
 import { BDSPDecorationProvider } from './decorationProvider';
 import { MessagePreviewProvider } from './messagePreviewProvider';
 import { ScriptIndexer } from './indexer';
 import { ScriptTracer } from './tracer'; 
+import { ReferenceTreeProvider } from './referenceTreeProvider';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('ReLumiStudio is active!');
 
-    // 1. Initialize Indexer & Tracer
     const indexer = new ScriptIndexer();
     indexer.refreshIndex(); 
     const tracer = new ScriptTracer(indexer); 
 
-    // Providers
     const navProvider = new BDSPNavigationProvider();
     const decoProvider = new BDSPDecorationProvider();
     const messageProvider = new MessagePreviewProvider(context.extensionUri);
+    const refTreeProvider = new ReferenceTreeProvider();
+    
+    // NATIVE EXPLORER
+    const explorerProvider = new RelumiExplorerProvider(); 
 
     context.subscriptions.push(
         vscode.languages.registerHoverProvider('bdsp', new BDSPHoverProvider()),
         vscode.languages.registerCompletionItemProvider('bdsp', new BDSPCompletionProvider(), '(', ',', '#', '$', '@'),
         vscode.languages.registerDefinitionProvider('bdsp', navProvider),
-        vscode.languages.registerReferenceProvider('bdsp', navProvider)
+        vscode.languages.registerReferenceProvider('bdsp', navProvider),
+        vscode.languages.registerCallHierarchyProvider('bdsp', navProvider)
     );
 
-    vscode.window.registerTreeDataProvider('relumi-scripts', new ScriptTreeProvider());
+    // Register Native Tree
+    vscode.window.registerTreeDataProvider('relumi-scripts', explorerProvider);
+    
+    // Register References Tree
+    vscode.window.registerTreeDataProvider('relumi-references', refTreeProvider);
     
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(MessagePreviewProvider.viewType, messageProvider)
     );
 
-    // Decoration Events
     const updateDecos = (editor: vscode.TextEditor | undefined) => {
         if (editor) decoProvider.triggerUpdate(editor);
     };
@@ -57,6 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (doc.languageId === 'bdsp' || doc.fileName.endsWith('.ev')) {
             console.log('File saved. Refreshing script index...');
             indexer.refreshIndex();
+            explorerProvider.refresh(true); 
         }
     }, null, context.subscriptions);
     
@@ -73,7 +80,6 @@ export function activate(context: vscode.ExtensionContext) {
         const document = editor.document;
         const lineText = document.lineAt(position.line).text;
 
-        // Hint Editor Sync
         if (HintEditorPanel.currentPanel) {
             const range = document.getWordRangeAtPosition(position);
             if (range) {
@@ -84,7 +90,6 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        // Message Preview Sync
         const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
         const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
 
@@ -101,14 +106,9 @@ export function activate(context: vscode.ExtensionContext) {
             rawMessage = DataManager.getInstance().getMessage(fileName, label);
             currentLabel = label;
             
-            if (!rawMessage) {
-                // messageProvider.updateMessage(`[ERROR] Message not found!`);
-                // Silently fail or clear if strictly no match found
-                return;
-            }
+            if (!rawMessage) return;
         } 
 
-        // --- Dynamic Placeholders ---
         if (rawMessage) {
             const placeholderRegex = /\{(\d+)(?::(\d+))?\}/g;
             let finalMessage = rawMessage;
@@ -136,12 +136,9 @@ export function activate(context: vscode.ExtensionContext) {
                 finalMessage = finalMessage.split(key).join(val);
             });
 
-            // Fetch speaker name if we have a label
             let speakerName: string | null = null;
             if (currentLabel) {
                 speakerName = DataManager.getInstance().getSpeaker(currentLabel);
-                // DEBUG LOG
-                console.log(`[Extension] Label: ${currentLabel} -> Speaker: ${speakerName}`);
             }
 
             messageProvider.updateMessage(finalMessage, speakerName);
@@ -157,22 +154,17 @@ export function activate(context: vscode.ExtensionContext) {
                     showedString = true;
                 }
             }
-            
-            if (!showedString) {
-                messageProvider.updateMessage("");
-            }
+            if (!showedString) messageProvider.updateMessage("");
         }
     };
 
-    // Events
     context.subscriptions.push(
         vscode.window.onDidChangeTextEditorSelection(triggerMessageUpdate)
     );
     
-    // Auto-refresh when data loads
     DataManager.getInstance().onDataLoadedEmitter.event(() => {
-        console.log('Data loaded, refreshing preview...');
         triggerMessageUpdate();
+        explorerProvider.refresh(true);
     });
 
     // Commands
@@ -184,18 +176,36 @@ export function activate(context: vscode.ExtensionContext) {
             DataManager.getInstance().loadData();
             indexer.refreshIndex(); 
         }),
-        vscode.commands.registerCommand('relumistudio.openAnalysis', () => {
-            AnalysisPanel.createOrShow(context.extensionUri);
-        }),
         vscode.commands.registerCommand('relumistudio.navMessagePrev', () => {
             messageProvider.navigate('prev');
         }),
         vscode.commands.registerCommand('relumistudio.navMessageNext', () => {
             messageProvider.navigate('next');
+        }),
+        vscode.commands.registerCommand('relumistudio.findAdvancedReferences', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) return;
+            const range = editor.document.getWordRangeAtPosition(editor.selection.active);
+            if (!range) return;
+            const word = editor.document.getText(range);
+            await vscode.commands.executeCommand('relumi-references.focus');
+            refTreeProvider.findReferences(word);
+        }),
+        vscode.commands.registerCommand('relumistudio.searchExplorer', async () => {
+            const term = await vscode.window.showInputBox({ 
+                placeHolder: "Filter scripts, flags, works...",
+                prompt: "Enter search term (leave empty to clear)",
+                value: explorerProvider.getFilterString()
+            });
+            if (term !== undefined) {
+                explorerProvider.setFilter(term);
+            }
+        }),
+        vscode.commands.registerCommand('relumistudio.clearExplorerFilter', () => {
+            explorerProvider.setFilter("");
         })
     );
 
-    // Initial Load
     DataManager.getInstance().loadData();
 }
 

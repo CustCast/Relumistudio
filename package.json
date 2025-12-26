@@ -62,7 +62,7 @@
       "relumi-sidebar": [
         {
           "id": "relumi-scripts",
-          "name": "Script Explorer",
+          "name": "Project Explorer",
           "icon": "$(list-tree)"
         }
       ],
@@ -72,6 +72,11 @@
           "name": "Message Preview",
           "type": "webview",
           "icon": "$(eye)"
+        },
+        {
+          "id": "relumi-references",
+          "name": "Advanced References",
+          "icon": "$(references)"
         }
       ]
     },
@@ -87,11 +92,6 @@
         "category": "ReLumiStudio"
       },
       {
-        "command": "relumistudio.openAnalysis",
-        "title": "ReLumiStudio: Analyze Project",
-        "category": "ReLumiStudio"
-      },
-      {
         "command": "relumistudio.navMessagePrev",
         "title": "Message Preview: Previous Page",
         "category": "ReLumiStudio"
@@ -99,6 +99,17 @@
       {
         "command": "relumistudio.navMessageNext",
         "title": "Message Preview: Next Page",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.findAdvancedReferences",
+        "title": "Find Advanced References",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.searchExplorer",
+        "title": "Search",
+        "icon": "$(search)",
         "category": "ReLumiStudio"
       }
     ],
@@ -122,16 +133,16 @@
           "command": "relumistudio.openHintEditor",
           "when": "resourceLangId == bdsp",
           "group": "navigation"
+        },
+        {
+          "command": "relumistudio.findAdvancedReferences",
+          "when": "resourceLangId == bdsp",
+          "group": "navigation@1"
         }
       ],
       "view/title": [
         {
-          "command": "relumistudio.openHintEditor",
-          "when": "view == relumi-scripts",
-          "group": "navigation"
-        },
-        {
-          "command": "relumistudio.openAnalysis",
+          "command": "relumistudio.searchExplorer",
           "when": "view == relumi-scripts",
           "group": "navigation"
         }

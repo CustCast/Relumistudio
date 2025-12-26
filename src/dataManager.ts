@@ -39,6 +39,7 @@ export interface HintSentencePart {
 
 export interface SimpleDef {
     Name: string;
+    Id?: number; // Added ID field
     Description?: string;
 }
 
@@ -71,7 +72,6 @@ export class DataManager {
     }
 
     public async loadData() {
-        console.log('[DataManager] Starting data load...');
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) return;
 
@@ -86,7 +86,6 @@ export class DataManager {
 
         await this.loadGameAssets(rootPath);
         
-        console.log('[DataManager] Data load complete. Firing event.');
         this.onDataLoadedEmitter.fire();
     }
 
@@ -95,41 +94,28 @@ export class DataManager {
         
         // 1. Scan English Message Files
         const englishPath = path.join(assetsPath, 'format_msbt', 'en', 'english');
-        console.log(`[DataManager] Scanning for messages in: ${englishPath}`);
         
         if (fs.existsSync(englishPath)) {
             const files = await vscode.workspace.findFiles(new vscode.RelativePattern(englishPath, '**/*.asset'));
-            console.log(`[DataManager] Found ${files.length} asset files in english folder.`);
-            
             for (const file of files) {
                 const fileName = path.basename(file.fsPath, '.asset');
                 if (fileName.includes('monsname')) this.parseUnityAsset(file.fsPath, this.pokes);
                 else if (fileName.includes('itemname')) this.parseUnityAsset(file.fsPath, this.items);
                 else if (fileName.includes('zkn_form')) this.parseUnityFormAsset(file.fsPath, this.forms);
                 else if (!fileName.includes('UIDatabase')) {
-                    if (fileName.includes('dlp_speakers_name') || fileName.includes('dlp_speaker_name')) {
-                        console.log(`[DataManager] Found speaker file: ${fileName}`);
-                    }
                     await this.parseMessageAsset(file.fsPath, fileName);
                 }
             }
-        } else {
-            console.warn(`[DataManager] English message folder NOT FOUND at: ${englishPath}`);
         }
 
         // 2. Load MsgWindowData
         const msgWindowPath = path.join(assetsPath, 'md', 'msgwindowdata', 'MsgWindowData.asset');
         if (fs.existsSync(msgWindowPath)) {
-            console.log(`[DataManager] Loading MsgWindowData from: ${msgWindowPath}`);
             this.parseMsgWindowData(msgWindowPath);
         } else {
-            console.warn(`[DataManager] MsgWindowData.asset NOT FOUND at: ${msgWindowPath}. Attempting search...`);
             const msgWindowFiles = await vscode.workspace.findFiles('**/MsgWindowData.asset');
             if (msgWindowFiles.length > 0) {
-                 console.log(`[DataManager] Fallback: Found MsgWindowData at ${msgWindowFiles[0].fsPath}`);
                  this.parseMsgWindowData(msgWindowFiles[0].fsPath);
-            } else {
-                console.error('[DataManager] Could not find MsgWindowData.asset anywhere!');
             }
         }
 
@@ -139,7 +125,7 @@ export class DataManager {
             this.parseUIDatabase(uiDbPath, this.balls);
         }
         
-        console.log(`[DataManager] Final Stats: ${this.messages.size} message files, ${this.msgWindowData.size} speaker mappings.`);
+        console.log(`[DataManager] Loaded ${this.messages.size} message files, ${this.msgWindowData.size} speaker mappings.`);
     }
 
     private async parseMessageAsset(filePath: string, fileName: string) {
@@ -156,26 +142,19 @@ export class DataManager {
             const lines = content.split(/\r?\n/);
             
             let inLabelArray = isSpeakerFile; 
-            
             let currentLabel = "";
             let currentFullText = ""; 
-            
             let wordStr: string | null = null;
             let wordEventID: number | null = null;
             let wordTagIndex: number = -1;
-            
             let currentLabelTags: { id: number, group: number }[] = []; 
             let tempTagIndexValue: number = -1;
             let tempGroupIDValue: number = 1;
-
             let inTagData = false;
             let inWordData = false;
 
             const commitWord = () => {
-                if (wordStr !== null) {
-                    currentFullText += wordStr;
-                }
-                
+                if (wordStr !== null) currentFullText += wordStr;
                 if (wordTagIndex !== -1) {
                     if (wordTagIndex < currentLabelTags.length) {
                         const tagDef = currentLabelTags[wordTagIndex];
@@ -184,15 +163,13 @@ export class DataManager {
                         currentFullText += `{${wordTagIndex}:1}`;
                     }
                 }
-
                 if (wordEventID !== null) {
                     if (wordEventID === 1) currentFullText += "{n}";
                     else if (wordEventID === 3) currentFullText += "{r}";
                     else if (wordEventID === 4) currentFullText += "{f}";
-                    else if (wordEventID === 0 || wordEventID === 2 || wordEventID >= 5) { /* No op */ }
+                    else if (wordEventID === 0 || wordEventID === 2 || wordEventID >= 5) { }
                     else currentFullText += "{n}";
                 }
-                
                 wordStr = null;
                 wordEventID = null;
                 wordTagIndex = -1;
@@ -212,9 +189,7 @@ export class DataManager {
 
             for (let i = 0; i < lines.length; i++) {
                 const rawLine = lines[i];
-                const trimmed = rawLine.trim();
-                const isNewItem = rawLine.trimStart().startsWith("-");
-                const cleanLine = trimmed.replace(/^- /, ''); 
+                const cleanLine = rawLine.trim().replace(/^- /, ''); 
 
                 if (cleanLine.startsWith("labelDataArray:")) {
                     inLabelArray = true;
@@ -224,29 +199,19 @@ export class DataManager {
                 if (inLabelArray) {
                     if (cleanLine.startsWith("labelName:")) {
                         commitWord(); 
-                        if (currentLabel && currentFullText) {
-                            labelMap.set(currentLabel.toLowerCase(), currentFullText);
-                        }
+                        if (currentLabel && currentFullText) labelMap.set(currentLabel.toLowerCase(), currentFullText);
                         const match = cleanLine.match(/labelName:\s*(.+)/);
-                        if (match) {
-                            currentLabel = match[1].trim();
-                        } else {
-                            currentLabel = cleanLine.substring("labelName:".length).trim();
-                        }
+                        if (match) currentLabel = match[1].trim();
+                        else currentLabel = cleanLine.substring("labelName:".length).trim();
                         resetLabelState();
                     }
-                    
                     else if (cleanLine.startsWith("tagDataArray:")) {
                         inTagData = true;
                         inWordData = false;
                     }
                     else if (inTagData) {
                         if (cleanLine.startsWith("wordDataArray:")) {
-                            if (tempTagIndexValue !== -1) {
-                                currentLabelTags.push({ id: tempTagIndexValue, group: tempGroupIDValue });
-                                tempTagIndexValue = -1;
-                                tempGroupIDValue = 1;
-                            }
+                            if (tempTagIndexValue !== -1) currentLabelTags.push({ id: tempTagIndexValue, group: tempGroupIDValue });
                             inTagData = false;
                             inWordData = true;
                         } 
@@ -255,30 +220,25 @@ export class DataManager {
                             i--; continue;
                         }
                         else {
-                            if (isNewItem && tempTagIndexValue !== -1) {
+                            if (rawLine.trimStart().startsWith("-") && tempTagIndexValue !== -1) {
                                 currentLabelTags.push({ id: tempTagIndexValue, group: tempGroupIDValue });
-                                tempTagIndexValue = -1;
-                                tempGroupIDValue = 1;
                             }
                             if (cleanLine.startsWith("tagIndex:")) {
-                                const val = cleanLine.substring("tagIndex:".length).trim();
-                                const id = parseInt(val);
-                                if (!isNaN(id)) tempTagIndexValue = id;
+                                const val = parseInt(cleanLine.substring("tagIndex:".length).trim());
+                                if (!isNaN(val)) tempTagIndexValue = val;
                             }
                             else if (cleanLine.startsWith("groupID:")) {
-                                const val = cleanLine.substring("groupID:".length).trim();
-                                const id = parseInt(val);
-                                if (!isNaN(id)) tempGroupIDValue = id;
+                                const val = parseInt(cleanLine.substring("groupID:".length).trim());
+                                if (!isNaN(val)) tempGroupIDValue = val;
                             }
                         }
                     }
-
                     else if (inWordData) {
                         if (cleanLine.startsWith("labelName:")) {
                             inWordData = false;
                             i--; continue;
                         }
-                        if (isNewItem) commitWord();
+                        if (rawLine.trimStart().startsWith("-")) commitWord();
 
                         if (cleanLine.startsWith("str:")) {
                             const match = cleanLine.match(/str:\s*(.+)/);
@@ -289,26 +249,18 @@ export class DataManager {
                             }
                         }
                         else if (cleanLine.startsWith("eventID:")) {
-                            const val = cleanLine.substring("eventID:".length).trim();
-                            const id = parseInt(val);
-                            if (!isNaN(id)) wordEventID = id;
+                            const val = parseInt(cleanLine.substring("eventID:".length).trim());
+                            if (!isNaN(val)) wordEventID = val;
                         }
                         else if (cleanLine.startsWith("tagIndex:")) {
-                            const val = cleanLine.substring("tagIndex:".length).trim();
-                            const id = parseInt(val);
-                            if (!isNaN(id)) wordTagIndex = id;
+                            const val = parseInt(cleanLine.substring("tagIndex:".length).trim());
+                            if (!isNaN(val)) wordTagIndex = val;
                         }
                     }
                 }
             }
             commitWord();
-            if (currentLabel && currentFullText) {
-                labelMap.set(currentLabel.toLowerCase(), currentFullText);
-            }
-
-            if (isSpeakerFile) {
-                console.log(`[DataManager] Parsed speaker file: ${fileName}. Entries: ${labelMap.size}`);
-            }
+            if (currentLabel && currentFullText) labelMap.set(currentLabel.toLowerCase(), currentFullText);
 
             this.messages.set(rawName.toLowerCase(), labelMap);
             this.messages.set(shortName.toLowerCase(), labelMap);
@@ -357,38 +309,25 @@ export class DataManager {
             const content = fs.readFileSync(filePath, 'utf-8');
             const lines = content.split(/\r?\n/);
             let currentLabel: string | null = null;
-            let count = 0;
             
-            // FIX: Added ^ anchors to prevent "talk_label" from matching "label"
             const labelRegex = /^(?:- )?(?:label|labelName)\s*:\s*(.+)/i;
             const talkRegex = /^(?:talk_label|talkLabel)\s*:\s*(.+)/i;
 
             for (const line of lines) {
                 const trimmed = line.trim();
-                
-                // 1. Find Label
                 const labelMatch = trimmed.match(labelRegex);
                 if (labelMatch) {
                     let val = labelMatch[1].trim();
-                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
-                        val = val.slice(1, -1);
-                    }
+                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) val = val.slice(1, -1);
                     currentLabel = val;
                 }
-                
-                // 2. Find Talk Label (Speaker)
                 const talkMatch = trimmed.match(talkRegex);
                 if (talkMatch && currentLabel) {
                     let val = talkMatch[1].trim();
-                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
-                        val = val.slice(1, -1);
-                    }
+                    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) val = val.slice(1, -1);
                     this.msgWindowData.set(currentLabel.toLowerCase(), val);
-                    count++;
                 }
             }
-            console.log(`[DataManager] Parsed MsgWindowData. Mapped ${count} labels to speakers.`);
-            
         } catch (e) {
             console.error("Error parsing MsgWindowData", e);
         }
@@ -409,44 +348,23 @@ export class DataManager {
         const cleanFile = fileName.toLowerCase();
         const cleanLabel = label.toLowerCase();
         const fileData = this.messages.get(cleanFile);
-        if (fileData && fileData.has(cleanLabel)) {
-            return fileData.get(cleanLabel)!;
-        }
+        if (fileData && fileData.has(cleanLabel)) return fileData.get(cleanLabel)!;
         return null;
     }
 
     public getSpeaker(messageLabel: string): string | null {
         const speakerLabel = this.msgWindowData.get(messageLabel.toLowerCase());
-        
         if (!speakerLabel) return null;
-
-        const possibleKeys = [
-            'dlp_speakers_name',
-            'english_dlp_speakers_name',
-            'dlp_speaker_name',
-            'english_dlp_speaker_name'
-        ];
-
+        const possibleKeys = ['dlp_speakers_name', 'english_dlp_speakers_name', 'dlp_speaker_name', 'english_dlp_speaker_name'];
         for (const key of possibleKeys) {
             const fileData = this.messages.get(key);
-            if (fileData) {
-                if (fileData.has(speakerLabel.toLowerCase())) {
-                    return fileData.get(speakerLabel.toLowerCase())!;
-                }
-            }
+            if (fileData && fileData.has(speakerLabel.toLowerCase())) return fileData.get(speakerLabel.toLowerCase())!;
         }
-        
         return speakerLabel;
     }
 
     public updateHintCache(newHints: HintConfig[]) { newHints.forEach(h => this.hints.set(h.Cmd, h)); this.onHintsChangedEmitter.fire(); }
-    public saveHintsToDisk(newHints: HintConfig[]) {
-        const folders = vscode.workspace.workspaceFolders;
-        if (!folders) return;
-        const filePath = path.join(folders[0].uri.fsPath, 'JSON', 'hints.json');
-        try { this.updateHintCache(newHints); fs.writeFileSync(filePath, JSON.stringify(newHints, null, 2), 'utf8'); vscode.window.showInformationMessage('Hints saved.'); } 
-        catch (e) { vscode.window.showErrorMessage(`Save failed: ${e}`); }
-    }
+    public saveHintsToDisk(newHints: HintConfig[]) { /* ... */ }
     public reloadHintsFromDisk() { /* ... */ }
     public removeFlag(name: string) { if (this.flags.has(name)) { this.flags.delete(name); this.saveMap('flags.json', this.flags); } }
     public removeSysFlag(name: string) { if (this.sysFlags.has(name)) { this.sysFlags.delete(name); this.saveMap('sys_flags.json', this.sysFlags); } }
