@@ -10,6 +10,7 @@ import { BDSPDecorationProvider } from './decorationProvider';
 import { MessagePreviewProvider } from './messagePreviewProvider';
 import { ScriptIndexer } from './indexer';
 import { ScriptTracer } from './tracer'; 
+import { BDSPSignatureHelpProvider } from './signatureProvider';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('ReLumiStudio is active!');
@@ -36,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
     // --- Registrations ---
     context.subscriptions.push(
         vscode.languages.registerHoverProvider('bdsp', new BDSPHoverProvider()),
+        vscode.languages.registerSignatureHelpProvider('bdsp', new BDSPSignatureHelpProvider(), '(', ','),
         vscode.languages.registerCompletionItemProvider('bdsp', new BDSPCompletionProvider(), '(', ',', '#', '$', '@'),
         vscode.languages.registerDefinitionProvider('bdsp', navProvider),
         vscode.languages.registerReferenceProvider('bdsp', navProvider),
@@ -48,7 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider('relumi-commands', commandsProvider);
     vscode.window.registerTreeDataProvider('relumi-analysis', analysisProvider);
     
-    // Register Message Preview View (Bottom Panel) - Using the correct ID from class
+    // Register Message Preview View (Bottom Panel)
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(MessagePreviewProvider.viewType, messageProvider)
     );
@@ -71,11 +73,9 @@ export function activate(context: vscode.ExtensionContext) {
             updateDecos(editor);
         }
 
-        // Debounced Refresh for ALL explorers (Updates counts while typing)
         if (event.document.languageId === 'bdsp' || event.document.fileName.endsWith('.ev')) {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
-                // Pass true to refresh word counts
                 allExplorers.forEach(p => p.refresh(true));
             }, 500);
         }
@@ -192,7 +192,6 @@ export function activate(context: vscode.ExtensionContext) {
             messageProvider.updateMessage(finalMessage, speakerName);
         }
         else {
-            // Clear message if no valid message found
             messageProvider.updateMessage("");
         }
     };
@@ -208,6 +207,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // --- Commands ---
     context.subscriptions.push(
+        // Command to handle the "Chain Completion" logic (re-trigger suggest and signature help)
+        vscode.commands.registerCommand('relumistudio.triggerNextArg', async () => {
+            // Small delay to ensure the insert text edit is fully applied
+            await new Promise(resolve => setTimeout(resolve, 50));
+            await vscode.commands.executeCommand('editor.action.triggerSuggest');
+            await vscode.commands.executeCommand('editor.action.triggerParameterHints');
+        }),
         vscode.commands.registerCommand('relumistudio.openHintEditor', () => {
             HintEditorPanel.createOrShow(context.extensionUri);
         }),
