@@ -6,6 +6,7 @@ interface CommandContext {
     name: string;
     argStart: number;
     lineText: string;
+    argIndex: number;
 }
 
 export class BDSPHoverProvider implements vscode.HoverProvider {
@@ -38,7 +39,7 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
                 let types: string[] = [];
                 let dependsOn: number | undefined;
 
-                const hint = data.hints.get(context.commandName);
+                const hint = data.hints.get(context.name);
                 if (hint && hint.Params) {
                     const param = hint.Params.find(p => p.Index === context.argIndex);
                     if (param && param.Type) {
@@ -48,7 +49,7 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
                 }
 
                 if (types.length === 0) {
-                    const cmd = data.commands.get(context.commandName);
+                    const cmd = data.commands.get(context.name);
                     if (cmd && cmd.Args && cmd.Args.length > context.argIndex) {
                         const t = cmd.Args[context.argIndex].Type;
                         types = Array.isArray(t) ? t : [t];
@@ -96,42 +97,87 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
         return new vscode.Hover(md);
     }
 
-    private getCommandContext(document: vscode.TextDocument, position: vscode.Position): { commandName: string, argIndex: number, lineText: string, argStart: number } | null {
+    private getCommandContext(document: vscode.TextDocument, position: vscode.Position): CommandContext | null {
         const line = document.lineAt(position.line).text;
         const cmdRegex = /([A-Z_][A-Z0-9_]*)\s*\(/g;
         let match;
         
-        // FIX: Explicit typing allows assignment later
-        let bestMatch: CommandContext | null = null;
-
         while ((match = cmdRegex.exec(line)) !== null) {
-            const openParenIndex = match.index + match[0].length; 
-            if (openParenIndex <= position.character) {
-                bestMatch = { 
-                    name: match[1], 
-                    argStart: openParenIndex, 
-                    lineText: line 
-                };
+            const start = match.index + match[0].length; 
+            if (start > position.character) break;
+
+            let inString = false;
+            let depth = 0;
+            let argIndex = 0;
+            let isClosed = false;
+
+            for (let i = start; i < line.length; i++) {
+                if (i === position.character) {
+                    if (!isClosed) {
+                        return { 
+                            name: match[1], 
+                            argStart: start, 
+                            lineText: line, 
+                            argIndex: argIndex
+                        };
+                    }
+                    break;
+                }
+
+                const char = line[i];
+                if (char === "'") {
+                    inString = !inString;
+                } else if (!inString) {
+                    if (char === '(') depth++;
+                    else if (char === ')') {
+                        if (depth > 0) depth--;
+                        else isClosed = true;
+                    }
+                    else if (char === ',' && depth === 0) {
+                        argIndex++;
+                    }
+                }
             }
         }
 
-        if (!bestMatch) return null;
-
-        const textSegment = line.substring(bestMatch.argStart, position.character);
-        const argIndex = (textSegment.match(/,/g) || []).length;
-
-        return { 
-            commandName: bestMatch.name, 
-            argIndex: argIndex, 
-            lineText: bestMatch.lineText,
-            argStart: bestMatch.argStart
-        };
+        return null;
     }
 
     private parseArgs(lineText: string, argStart: number): string[] {
-        const closingParen = lineText.indexOf(')', argStart);
-        if (closingParen === -1) return [];
-        const argsStr = lineText.substring(argStart, closingParen);
-        return argsStr.split(',').map(s => s.trim());
+        const args: string[] = [];
+        let current = "";
+        let inString = false;
+        let depth = 0;
+
+        for (let i = argStart; i < lineText.length; i++) {
+            const char = lineText[i];
+            if (char === "'") {
+                inString = !inString;
+                current += char;
+            } else if (!inString) {
+                if (char === '(') {
+                    depth++;
+                    current += char;
+                } else if (char === ')') {
+                    if (depth > 0) {
+                        depth--;
+                        current += char;
+                    } else {
+                        args.push(current.trim());
+                        return args;
+                    }
+                } else if (char === ',' && depth === 0) {
+                    args.push(current.trim());
+                    current = "";
+                } else {
+                    current += char;
+                }
+            } else {
+                current += char;
+            }
+        }
+        
+        if (current) args.push(current.trim());
+        return args;
     }
 }
