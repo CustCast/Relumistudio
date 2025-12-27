@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 export class MessagePreviewProvider implements vscode.WebviewViewProvider {
+    // ID matched to package.json
     public static readonly viewType = 'relumi-message-preview';
     private _view?: vscode.WebviewView;
 

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { DataManager } from './dataManager';
 import { RelumiExplorerProvider } from './explorerProvider';
 import { BDSPHoverProvider } from './hoverProvider';
@@ -9,23 +10,30 @@ import { BDSPDecorationProvider } from './decorationProvider';
 import { MessagePreviewProvider } from './messagePreviewProvider';
 import { ScriptIndexer } from './indexer';
 import { ScriptTracer } from './tracer'; 
-import { ReferenceTreeProvider } from './referenceTreeProvider';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('ReLumiStudio is active!');
 
+    // --- Services ---
     const indexer = new ScriptIndexer();
     indexer.refreshIndex(); 
     const tracer = new ScriptTracer(indexer); 
 
     const navProvider = new BDSPNavigationProvider();
     const decoProvider = new BDSPDecorationProvider();
-    const messageProvider = new MessagePreviewProvider(context.extensionUri);
-    const refTreeProvider = new ReferenceTreeProvider();
     
-    // NATIVE EXPLORER
-    const explorerProvider = new RelumiExplorerProvider(); 
+    // Instantiate Message Provider
+    const messageProvider = new MessagePreviewProvider(context.extensionUri);
 
+    // --- EXPLORER PROVIDERS (One for each view) ---
+    const scriptsProvider = new RelumiExplorerProvider('relumi-scripts');
+    const dataProvider = new RelumiExplorerProvider('relumi-data');
+    const commandsProvider = new RelumiExplorerProvider('relumi-commands');
+    const analysisProvider = new RelumiExplorerProvider('relumi-analysis');
+
+    const allExplorers = [scriptsProvider, dataProvider, commandsProvider, analysisProvider];
+
+    // --- Registrations ---
     context.subscriptions.push(
         vscode.languages.registerHoverProvider('bdsp', new BDSPHoverProvider()),
         vscode.languages.registerCompletionItemProvider('bdsp', new BDSPCompletionProvider(), '(', ',', '#', '$', '@'),
@@ -34,28 +42,46 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerCallHierarchyProvider('bdsp', navProvider)
     );
 
-    // Register Native Tree
-    vscode.window.registerTreeDataProvider('relumi-scripts', explorerProvider);
+    // Register 4 Separate Views for Sidebar
+    vscode.window.registerTreeDataProvider('relumi-scripts', scriptsProvider);
+    vscode.window.registerTreeDataProvider('relumi-data', dataProvider);
+    vscode.window.registerTreeDataProvider('relumi-commands', commandsProvider);
+    vscode.window.registerTreeDataProvider('relumi-analysis', analysisProvider);
     
-    // Register References Tree
-    vscode.window.registerTreeDataProvider('relumi-references', refTreeProvider);
-    
+    // Register Message Preview View (Bottom Panel) - Using the correct ID from class
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(MessagePreviewProvider.viewType, messageProvider)
     );
+
+    // --- Event Listeners ---
 
     const updateDecos = (editor: vscode.TextEditor | undefined) => {
         if (editor) decoProvider.triggerUpdate(editor);
     };
 
+    // 1. Editor Change
     vscode.window.onDidChangeActiveTextEditor(editor => updateDecos(editor), null, context.subscriptions);
     
+    // 2. Document Change
+    let debounceTimer: NodeJS.Timeout | undefined;
+
     vscode.workspace.onDidChangeTextDocument(event => {
-        if (vscode.window.activeTextEditor && event.document === vscode.window.activeTextEditor.document) {
-            updateDecos(vscode.window.activeTextEditor);
+        const editor = vscode.window.activeTextEditor;
+        if (editor && event.document === editor.document) {
+            updateDecos(editor);
+        }
+
+        // Debounced Refresh for ALL explorers (Updates counts while typing)
+        if (event.document.languageId === 'bdsp' || event.document.fileName.endsWith('.ev')) {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                // Pass true to refresh word counts
+                allExplorers.forEach(p => p.refresh(true));
+            }, 500);
         }
     }, null, context.subscriptions);
     
+    // 3. Save Event
     vscode.workspace.onDidSaveTextDocument(doc => {
         if (vscode.window.activeTextEditor && doc === vscode.window.activeTextEditor.document) {
             updateDecos(vscode.window.activeTextEditor);
@@ -63,7 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (doc.languageId === 'bdsp' || doc.fileName.endsWith('.ev')) {
             console.log('File saved. Refreshing script index...');
             indexer.refreshIndex();
-            explorerProvider.refresh(true); 
+            allExplorers.forEach(p => p.refresh(true));
         }
     }, null, context.subscriptions);
     
@@ -80,6 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
         const document = editor.document;
         const lineText = document.lineAt(position.line).text;
 
+        // Sync Hint Editor
         if (HintEditorPanel.currentPanel) {
             const range = document.getWordRangeAtPosition(position);
             if (range) {
@@ -90,30 +117,54 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
-        const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
-
         let rawMessage: string | null = null;
         let currentLabel: string | null = null;
 
-        if (macroMatch) {
-            rawMessage = macroMatch[3];
-            currentLabel = macroMatch[2];
-        } 
-        else if (stdMatch) {
-            const fileName = stdMatch[1];
-            const label = stdMatch[2];
-            rawMessage = DataManager.getInstance().getMessage(fileName, label);
-            currentLabel = label;
-            
-            if (!rawMessage) return;
-        } 
+        const stringRange = document.getWordRangeAtPosition(position, /'([^']*)'/);
+        
+        if (stringRange) {
+            const rawString = document.getText(stringRange);
+            const content = rawString.substring(1, rawString.length - 1);
+
+            let msgFile = "";
+            let msgLabel = "";
+
+            if (content.includes('%')) {
+                const parts = content.split('%');
+                msgFile = parts[0];
+                msgLabel = parts[1];
+            } else {
+                msgFile = path.basename(document.fileName, '.ev');
+                msgLabel = content;
+            }
+
+            const candidateMsg = DataManager.getInstance().getMessage(msgFile, msgLabel);
+            if (candidateMsg && candidateMsg !== msgLabel && candidateMsg !== content) {
+                rawMessage = candidateMsg;
+                currentLabel = msgLabel;
+            }
+        }
+
+        if (!rawMessage) {
+            const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
+            const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
+
+            if (macroMatch) {
+                rawMessage = macroMatch[3];
+                currentLabel = macroMatch[2];
+            } 
+            else if (stdMatch) {
+                const fileName = stdMatch[1];
+                const label = stdMatch[2];
+                rawMessage = DataManager.getInstance().getMessage(fileName, label);
+                currentLabel = label;
+            } 
+        }
 
         if (rawMessage) {
             const placeholderRegex = /\{(\d+)(?::(\d+))?\}/g;
             let finalMessage = rawMessage;
             let match;
-
             const replacements = new Map<string, string>();
 
             while ((match = placeholderRegex.exec(rawMessage)) !== null) {
@@ -123,7 +174,6 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (!replacements.has(fullMatch)) {
                     const resolvedCmd = await tracer.resolveTagIndex(document, position.line, tagIndex, groupID);
-                    
                     if (resolvedCmd) {
                         replacements.set(fullMatch, resolvedCmd); 
                     } else {
@@ -131,7 +181,6 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                 }
             }
-
             replacements.forEach((val, key) => {
                 finalMessage = finalMessage.split(key).join(val);
             });
@@ -140,21 +189,11 @@ export function activate(context: vscode.ExtensionContext) {
             if (currentLabel) {
                 speakerName = DataManager.getInstance().getSpeaker(currentLabel);
             }
-
             messageProvider.updateMessage(finalMessage, speakerName);
         }
         else {
-            const simpleMatch = lineText.match(/'([^']*)'/);
-            let showedString = false;
-
-            if (simpleMatch) {
-                const idx = lineText.indexOf(simpleMatch[0]);
-                if (position.character >= idx && position.character <= idx + simpleMatch[0].length) {
-                    messageProvider.updateMessage(simpleMatch[1]);
-                    showedString = true;
-                }
-            }
-            if (!showedString) messageProvider.updateMessage("");
+            // Clear message if no valid message found
+            messageProvider.updateMessage("");
         }
     };
 
@@ -164,10 +203,10 @@ export function activate(context: vscode.ExtensionContext) {
     
     DataManager.getInstance().onDataLoadedEmitter.event(() => {
         triggerMessageUpdate();
-        explorerProvider.refresh(true);
+        allExplorers.forEach(p => p.refresh(true));
     });
 
-    // Commands
+    // --- Commands ---
     context.subscriptions.push(
         vscode.commands.registerCommand('relumistudio.openHintEditor', () => {
             HintEditorPanel.createOrShow(context.extensionUri);
@@ -182,27 +221,19 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('relumistudio.navMessageNext', () => {
             messageProvider.navigate('next');
         }),
-        vscode.commands.registerCommand('relumistudio.findAdvancedReferences', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) return;
-            const range = editor.document.getWordRangeAtPosition(editor.selection.active);
-            if (!range) return;
-            const word = editor.document.getText(range);
-            await vscode.commands.executeCommand('relumi-references.focus');
-            refTreeProvider.findReferences(word);
-        }),
         vscode.commands.registerCommand('relumistudio.searchExplorer', async () => {
+            const currentFilter = allExplorers[0].getFilterString();
             const term = await vscode.window.showInputBox({ 
                 placeHolder: "Filter scripts, flags, works...",
                 prompt: "Enter search term (leave empty to clear)",
-                value: explorerProvider.getFilterString()
+                value: currentFilter
             });
             if (term !== undefined) {
-                explorerProvider.setFilter(term);
+                allExplorers.forEach(p => p.setFilter(term));
             }
         }),
         vscode.commands.registerCommand('relumistudio.clearExplorerFilter', () => {
-            explorerProvider.setFilter("");
+            allExplorers.forEach(p => p.setFilter(""));
         })
     );
 
