@@ -10,139 +10,143 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
         context: vscode.SignatureHelpContext
     ): vscode.ProviderResult<vscode.SignatureHelp> {
 
-        const data = DataManager.getInstance();
-        
-        // Reuse the robust context logic
-        const cmdContext = this.getCommandContext(document, position);
-        if (!cmdContext) return null;
-
-        const { commandName, argIndex } = cmdContext;
-
-        const cmdDef = data.commands.get(commandName);
-        const hintDef = data.hints.get(commandName);
-
-        if (!cmdDef && !hintDef) return null;
-
-        const help = new vscode.SignatureHelp();
-        help.activeParameter = argIndex;
-        help.activeSignature = 0;
-
-        const paramInfos: vscode.ParameterInformation[] = [];
-        let label = `${commandName}(`;
-
-        // Determine max args
-        let maxArgs = 0;
-        if (cmdDef && cmdDef.Args) maxArgs = cmdDef.Args.length;
-        if (hintDef && hintDef.Params) {
-             const maxHint = hintDef.Params.reduce((m, p) => Math.max(m, p.Index + 1), 0);
-             maxArgs = Math.max(maxArgs, maxHint);
-        }
-
-        // If user typed more args than we know, show them anyway
-        const showCount = Math.max(maxArgs, argIndex + 1);
-
-        for (let i = 0; i < showCount; i++) {
-            let paramLabel = `Arg${i}`;
-            let paramDoc: string | vscode.MarkdownString = "";
-
-            const hintParam = hintDef?.Params?.find(p => p.Index === i);
+        try {
+            const data = DataManager.getInstance();
             
-            // Priority 1: Hints
-            if (hintParam) {
-                paramLabel = hintParam.Ref;
-                if (hintParam.Description) paramDoc = hintParam.Description;
-            } 
-            // Priority 2: Command Def
-            else if (cmdDef && cmdDef.Args && cmdDef.Args[i]) {
-                paramLabel = cmdDef.Args[i].TentativeName;
-                const type = cmdDef.Args[i].Type;
-                if (type) {
-                    const typeStr = Array.isArray(type) ? type.join(' | ') : type;
-                    paramDoc = `Type: ${typeStr}`;
-                }
+            // 1. Find Context
+            const cmdContext = this.getCommandContext(document, position);
+            if (!cmdContext) return null;
+
+            const { commandName, argIndex } = cmdContext;
+
+            // 2. Lookup Definitions (Strict Priority)
+            const hintDef = data?.hints?.get(commandName);
+            const cmdDef = data?.commands?.get(commandName);
+
+            // If hints exist, we use ONLY hints. Otherwise, we use commands.
+            const activeDef = hintDef || cmdDef;
+            const isHint = !!hintDef;
+
+            // If neither exists, we return generic help so the box doesn't disappear
+            // (failsafe for user typing undefined commands)
+            
+            const help = new vscode.SignatureHelp();
+            help.activeParameter = argIndex;
+            help.activeSignature = 0;
+
+            const paramInfos: vscode.ParameterInformation[] = [];
+            let label = `${commandName}(`;
+
+            // 3. Calculate Params
+            let maxArgs = 0;
+
+            if (isHint && hintDef && hintDef.Params) {
+                 const maxHint = hintDef.Params.reduce((m, p) => Math.max(m, p.Index + 1), 0);
+                 maxArgs = maxHint;
+            } else if (!isHint && cmdDef && cmdDef.Args) {
+                 maxArgs = cmdDef.Args.length;
             }
 
-            if (i > 0) label += ", ";
+            // Ensure we show at least enough args to cover the user's current cursor
+            const showCount = Math.max(maxArgs, argIndex + 1);
+
+            for (let i = 0; i < showCount; i++) {
+                let paramLabel = `Arg${i}`;
+                let paramDoc: string | vscode.MarkdownString | undefined = undefined;
+
+                if (isHint && hintDef && hintDef.Params) {
+                    const hintParam = hintDef.Params.find(p => p.Index === i);
+                    if (hintParam) {
+                        paramLabel = hintParam.Ref || `Arg${i}`;
+                        if (hintParam.Description) paramDoc = hintParam.Description;
+                    }
+                } 
+                else if (!isHint && cmdDef && cmdDef.Args && cmdDef.Args[i]) {
+                    paramLabel = cmdDef.Args[i].TentativeName || `Arg${i}`;
+                    const type = cmdDef.Args[i].Type;
+                    if (type) {
+                        const typeStr = Array.isArray(type) ? type.join(' | ') : type;
+                        paramDoc = `Type: ${typeStr}`;
+                    }
+                }
+
+                if (i > 0) label += ", ";
+                
+                const start = label.length;
+                label += paramLabel;
+                const end = label.length;
+
+                paramInfos.push(new vscode.ParameterInformation([start, end], paramDoc));
+            }
+
+            label += ")";
+
+            const sigInfo = new vscode.SignatureInformation(label);
             
-            const start = label.length;
-            label += paramLabel;
-            const end = label.length;
+            if (activeDef && activeDef.Description) {
+                sigInfo.documentation = new vscode.MarkdownString(activeDef.Description);
+            }
 
-            paramInfos.push(new vscode.ParameterInformation([start, end], paramDoc));
+            sigInfo.parameters = paramInfos;
+            help.signatures = [sigInfo];
+
+            return help;
+
+        } catch (error) {
+            console.error("[BDSP-Sig] Error:", error);
+            return null;
         }
-
-        label += ")";
-
-        const sigInfo = new vscode.SignatureInformation(label);
-        
-        if (hintDef && hintDef.Description) {
-            sigInfo.documentation = new vscode.MarkdownString(hintDef.Description);
-        } else if (cmdDef && cmdDef.Description) {
-            sigInfo.documentation = new vscode.MarkdownString(cmdDef.Description);
-        }
-
-        sigInfo.parameters = paramInfos;
-        help.signatures = [sigInfo];
-
-        return help;
     }
 
     private getCommandContext(document: vscode.TextDocument, position: vscode.Position) {
-        let startLine = position.line;
-        let foundCmdMatch: RegExpExecArray | null = null;
-        let foundLineIndex = -1;
+        const lineText = document.lineAt(position.line).text;
+        
+        const commentIdx = lineText.indexOf('//');
+        if (commentIdx !== -1 && position.character > commentIdx) return null;
 
         const cmdRegex = /([A-Z_][A-Z0-9_]*)\s*\(/g;
-        
-        // 1. Find command start (look back 10 lines)
-        for (let i = startLine; i >= Math.max(0, startLine - 10); i--) {
-            const lineText = document.lineAt(i).text;
-            cmdRegex.lastIndex = 0;
-            let match;
-            while ((match = cmdRegex.exec(lineText)) !== null) {
-                if (i === startLine && match.index + match[0].length > position.character) continue;
-                foundCmdMatch = match;
-                foundLineIndex = i;
+        let match;
+        let validMatch: { commandName: string; argIndex: number } | null = null;
+        let safetyCounter = 0;
+
+        while ((match = cmdRegex.exec(lineText)) !== null && safetyCounter++ < 100) {
+            const name = match[1];
+            const start = match.index + match[0].length;
+            
+            if (start > position.character) break;
+
+            let inString = false;
+            let depth = 0;
+            let closed = false;
+            let argIndex = 0;
+
+            for (let i = start; i < position.character; i++) {
+                if (i >= lineText.length) break;
+
+                const char = lineText[i];
+                if (char === "'") {
+                    inString = !inString;
+                } else if (!inString) {
+                    if (char === '(') {
+                        depth++;
+                    } else if (char === ')') {
+                        if (depth > 0) {
+                            depth--;
+                        } else {
+                            closed = true;
+                            break;
+                        }
+                    } else if (char === ',' && depth === 0) {
+                        argIndex++;
+                    }
+                }
             }
-            if (foundCmdMatch) break;
-        }
 
-        if (!foundCmdMatch || foundLineIndex === -1) return null;
-
-        const commandName = foundCmdMatch[1];
-        const cmdStartIndex = foundCmdMatch.index + foundCmdMatch[0].length;
-
-        // 2. Build full text to count commas
-        let fullText = "";
-        
-        for (let i = foundLineIndex; i <= startLine; i++) {
-            let lineStr = document.lineAt(i).text;
-            const commentIdx = lineStr.indexOf('//');
-            if (commentIdx !== -1) lineStr = lineStr.substring(0, commentIdx);
-
-            if (i === foundLineIndex) {
-                if (i === startLine) fullText += lineStr.substring(cmdStartIndex, position.character);
-                else fullText += lineStr.substring(cmdStartIndex);
-            } else if (i === startLine) {
-                fullText += lineStr.substring(0, position.character);
-            } else {
-                fullText += lineStr;
-            }
-        }
-
-        // 3. Robust comma counting
-        let argIndex = 0;
-        let inString = false;
-        
-        for (let j = 0; j < fullText.length; j++) {
-            const char = fullText[j];
-            if (char === "'") {
-                inString = !inString;
-            } else if (char === ',' && !inString) {
-                argIndex++;
+            if (!closed) {
+                validMatch = { commandName: name, argIndex };
             }
         }
-
-        return { commandName, argIndex };
+        
+        return validMatch;
     }
 }
