@@ -71,11 +71,16 @@ export function activate(context: vscode.ExtensionContext) {
     }, null, context.subscriptions);
     
     // 3. Save Event (Refresh expensive things here)
+    // FIX: Debounce save event to prevent spamming refreshIndex
+    let saveDebounce: NodeJS.Timeout | undefined;
     vscode.workspace.onDidSaveTextDocument(doc => {
         if (doc.languageId === 'bdsp' || doc.fileName.endsWith('.ev')) {
-            DataManager.log('File saved. Refreshing analysis and index...');
-            indexer.refreshIndex();
-            allExplorers.forEach(p => p.refresh(true));
+            if (saveDebounce) clearTimeout(saveDebounce);
+            saveDebounce = setTimeout(() => {
+                DataManager.log('File saved. Refreshing analysis and index...');
+                indexer.refreshIndex();
+                allExplorers.forEach(p => p.refresh(true));
+            }, 1000); // 1-second delay
         }
     }, null, context.subscriptions);
 

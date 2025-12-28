@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 export class ScriptIndexer {
     // Map: "Event_Name" -> Location (File + Line)
@@ -21,8 +22,8 @@ export class ScriptIndexer {
 
     private async parseFile(uri: vscode.Uri) {
         try {
-            const document = await vscode.workspace.openTextDocument(uri);
-            const text = document.getText();
+            // FIX: Read file directly from disk to avoid overloading VS Code's Extension Host memory
+            const text = fs.readFileSync(uri.fsPath, 'utf-8');
             
             // Adjust Regex to match your BDSP syntax
             // Captures: "Label @EventName" or similar
@@ -33,13 +34,13 @@ export class ScriptIndexer {
             let match;
             while ((match = labelRegex.exec(text)) !== null) {
                 const labelName = match[1];
-                const position = document.positionAt(match.index);
+                const position = this.getPositionAt(text, match.index);
                 this.labelDefinitions.set(labelName, new vscode.Location(uri, position));
             }
 
             while ((match = jumpRegex.exec(text)) !== null) {
                 const labelName = match[1];
-                const position = document.positionAt(match.index);
+                const position = this.getPositionAt(text, match.index);
                 
                 if (!this.jumpReferences.has(labelName)) {
                     this.jumpReferences.set(labelName, []);
@@ -49,6 +50,14 @@ export class ScriptIndexer {
         } catch (e) {
             console.error(`Indexer failed on ${uri.fsPath}`, e);
         }
+    }
+
+    private getPositionAt(text: string, index: number): vscode.Position {
+        const sub = text.substring(0, index);
+        const lines = sub.split(/\r?\n/);
+        const line = lines.length - 1;
+        const char = lines[lines.length - 1].length;
+        return new vscode.Position(line, char);
     }
 
     public getPredecessors(labelName: string): vscode.Location[] {
