@@ -238,7 +238,6 @@ export class HintEditorPanel {
         let allHints = [];
         let selectedIndex = -1;
         
-        // --- ADDED: NumberIndex ---
         const CategoryMap = { 
             "Value": ["Value", "Number", "Pokemon", "Ball", "Form", "Item", "TagIndex", "NumberIndex"], 
             "Work": ["Work"], 
@@ -446,7 +445,7 @@ export class HintEditorPanel {
             }
             const p = allHints[selectedIndex].Params[pIndex];
             
-            if (!p.Fragments) p.Fragments = {}; // Ensure initialization
+            if (!p.Fragments) p.Fragments = {}; 
             p.Fragments[type] = \`\${prefix}{Value}\${suffix}\`;
             
             triggerLiveUpdate();
@@ -459,27 +458,23 @@ export class HintEditorPanel {
             const p = allHints[selectedIndex].Params[pIndex];
             const oldType = p.Type[tIndex];
 
-            if (oldType === newType) return; // Prevent unnecessary updates and accidental deletion
+            if (oldType === newType) return; 
 
-            // Check if oldType is used by other rows
             let othersUseOld = false;
             p.Type.forEach((t, i) => { if(i !== tIndex && t === oldType) othersUseOld = true; });
 
-            if (!p.Fragments) p.Fragments = {}; // Ensure exists
+            if (!p.Fragments) p.Fragments = {};
             const content = p.Fragments[oldType] || '{Value}';
             p.Type[tIndex] = newType;
 
-            // Preserve content to new type if not exists
             if (!p.Fragments[newType]) {
                 p.Fragments[newType] = content;
             }
 
-            // Only delete old type key if no one else uses it
             if (!othersUseOld) {
                 delete p.Fragments[oldType];
             }
             
-            // Handle Zero Logic
             if (p.ShowZero && p.ShowZero.includes(oldType)) {
                 p.ShowZero = p.ShowZero.filter(x=>x!==oldType); 
                 p.ShowZero.push(newType);
@@ -540,7 +535,13 @@ export class HintEditorPanel {
         }
         function addParam() {
             const h = allHints[selectedIndex];
-            h.Params.push({ Index: h.Params.length, Ref: 'arg'+h.Params.length, Type:['Value'], Fragments:{'Value':'{Value}'} });
+            h.Params.push({ 
+                Index: h.Params.length, 
+                Ref: 'arg'+h.Params.length, 
+                Type:['Value'], 
+                Description: '', // ADDED DESCRIPTION FIELD HERE
+                Fragments:{'Value':'{Value}'} 
+            });
             renderParams();
             triggerLiveUpdate();
         }
@@ -566,7 +567,6 @@ export class HintEditorPanel {
             const p = allHints[selectedIndex].Params[pIndex];
             const type = p.Type[tIndex];
             
-            // Check usage
             let othersUse = false;
             p.Type.forEach((t, i) => { if (i !== tIndex && t === type) othersUse = true; });
 

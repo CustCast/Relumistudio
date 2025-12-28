@@ -100,7 +100,7 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
         if (!element) {
             const roots: ExplorerNode[] = [];
 
-            // Add Filter Banner if active (only to the top of the list)
+            // Add Filter Banner if active
             if (this._filterString) {
                 roots.push(new ExplorerNode(
                     `Filtering by: "${this._filterString}"`, 
@@ -116,7 +116,6 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
                 if (folders) {
                     const scriptsUri = vscode.Uri.joinPath(folders[0].uri, 'scripts');
                     if (fs.existsSync(scriptsUri.fsPath)) {
-                        // Return files directly at root level
                         return roots.concat(this.filterNodes(await this.getFiles(scriptsUri)));
                     }
                 }
@@ -154,8 +153,8 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
 
             // --- VIEW: COMMANDS (Commands, Macros) ---
             if (this.viewId === 'relumi-commands') {
-                // Commands
-                const usedCmdNodes = Array.from(data.commands.values()).filter(c => usedWords.has(c.Name));
+                // Commands (HINTS)
+                const usedCmdNodes = Array.from(data.hints.values()).filter(c => usedWords.has(c.Cmd));
                 const filteredUsedCmds = this.filterDataNodes(usedCmdNodes);
                 if (filteredUsedCmds.length > 0 || !this._filterString) {
                     roots.push(new ExplorerNode(`Commands (${filteredUsedCmds.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'category'));
@@ -180,7 +179,8 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
                 const uWorks = this.filterDataNodes(Array.from(data.works.values()).filter(w => !usedWords.has(w.Name)));
                 if(uWorks.length > 0) roots.push(new ExplorerNode(`Unused Works (${uWorks.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'category'));
 
-                const uCmds = this.filterDataNodes(Array.from(data.commands.values()).filter(c => !usedWords.has(c.Name)));
+                // Unused Commands (HINTS)
+                const uCmds = this.filterDataNodes(Array.from(data.hints.values()).filter(c => !usedWords.has(c.Cmd)));
                 if(uCmds.length > 0) roots.push(new ExplorerNode(`Unused Commands (${uCmds.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'category'));
                 
                 return roots;
@@ -217,10 +217,10 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
             return this.filterDataNodes(list).map(w => this.createDataNode(w, usedWords.get(w.Name), 'work'));
         }
         
-        // Command Categories
+        // Command Categories (UPDATED)
         if (element.label.startsWith("Commands")) {
-            const list = Array.from(data.commands.values()).filter(c => usedWords.has(c.Name)).sort((a, b) => a.Name.localeCompare(b.Name));
-            return this.filterDataNodes(list).map(c => this.createDataNode(c, usedWords.get(c.Name), 'command'));
+            const list = Array.from(data.hints.values()).filter(c => usedWords.has(c.Cmd)).sort((a, b) => a.Cmd.localeCompare(b.Cmd));
+            return this.filterDataNodes(list).map(c => this.createDataNode(c, usedWords.get(c.Cmd), 'command'));
         }
         if (element.label.startsWith("Macros")) {
             const macroKeys = Array.from(usedWords.keys()).filter(k => k.startsWith('_MACRO_')).sort();
@@ -243,8 +243,9 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
             return this.filterDataNodes(list).map(w => new ExplorerNode(w.Name, vscode.TreeItemCollapsibleState.None, 'work', undefined, undefined, "Unused"));
         }
         if (element.label.startsWith("Unused Commands")) {
-            const list = Array.from(data.commands.values()).filter(c => !usedWords.has(c.Name));
-            return this.filterDataNodes(list).map(c => new ExplorerNode(c.Name, vscode.TreeItemCollapsibleState.None, 'command', undefined, undefined, c.Description));
+            // UPDATED: Use hints
+            const list = Array.from(data.hints.values()).filter(c => !usedWords.has(c.Cmd));
+            return this.filterDataNodes(list).map(c => new ExplorerNode(c.Cmd, vscode.TreeItemCollapsibleState.None, 'command', undefined, undefined, c.Description));
         }
 
         // Usage Drilldown
@@ -263,10 +264,11 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
     private createDataNode(item: any, count: number | undefined, type: ExplorerNodeType): ExplorerNode {
         const c = count || 0;
         const idStr = item.Id !== undefined ? `[${item.Id}] ` : '';
-        const label = `${idStr}${item.Name} (${c})`;
-        // Unused items might not need collapsible state if we don't drill down
+        // Handle Hint objects (Cmd) vs SimpleDefs (Name)
+        const name = item.Cmd || item.Name; 
+        const label = `${idStr}${name} (${c})`;
         const state = c > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
-        return new ExplorerNode(label, state, type, undefined, { name: item.Name, type: type }, item.Description);
+        return new ExplorerNode(label, state, type, undefined, { name: name, type: type }, item.Description);
     }
 
     private readContent(uri: vscode.Uri): string {
@@ -280,10 +282,11 @@ export class RelumiExplorerProvider implements vscode.TreeDataProvider<ExplorerN
         return nodes.filter(n => n.label.toLowerCase().includes(this._filterString));
     }
 
-    private filterDataNodes<T extends { Name: string, Id?: number, Description?: string }>(items: T[]): T[] {
+    private filterDataNodes<T extends { Name?: string, Cmd?: string, Id?: number, Description?: string }>(items: T[]): T[] {
         if (!this._filterString) return items;
         return items.filter(item => {
-            const nameMatch = item.Name.toLowerCase().includes(this._filterString);
+            const name = item.Cmd || item.Name || "";
+            const nameMatch = name.toLowerCase().includes(this._filterString);
             const idMatch = item.Id ? item.Id.toString().includes(this._filterString) : false;
             const descMatch = item.Description ? item.Description.toLowerCase().includes(this._filterString) : false;
             return nameMatch || idMatch || descMatch;

@@ -2,24 +2,13 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export interface CommandDef {
-    Name: string;
-    Args: ArgDef[];
-    Description?: string;
-}
-
-export interface ArgDef {
-    TentativeName: string;
-    Type: string | string[]; 
-    Description?: string;
-}
-
 export interface HintConfig {
     Cmd: string;
     Description?: string;
     Params?: HintParam[];
     Sentence?: HintSentencePart[];
     IsEnabled?: boolean;
+    Id?: number; 
 }
 
 export interface HintParam {
@@ -39,13 +28,14 @@ export interface HintSentencePart {
 
 export interface SimpleDef {
     Name: string;
-    Id?: number; // Added ID field
+    Id?: number; 
     Description?: string;
 }
 
 export class DataManager {
-    public commands: Map<string, CommandDef> = new Map();
+    // SINGLE SOURCE OF TRUTH: Hints only.
     public hints: Map<string, HintConfig> = new Map();
+    
     public flags: Map<string, SimpleDef> = new Map();
     public sysFlags: Map<string, SimpleDef> = new Map();
     public works: Map<string, SimpleDef> = new Map();
@@ -55,15 +45,15 @@ export class DataManager {
     public forms: Map<string, string> = new Map(); 
     public balls: Map<number, number> = new Map(); 
     
-    // Mapping: MessageLabel (lowercase) -> SpeakerLabel (e.g. DLP_SPEAKERS_NAME_OAK)
     public msgWindowData: Map<string, string> = new Map();
-
     public messages: Map<string, Map<string, string>> = new Map();
 
     public readonly onHintsChangedEmitter = new vscode.EventEmitter<void>();
     public readonly onDataLoadedEmitter = new vscode.EventEmitter<void>();
 
     private static instance: DataManager;
+    private static outputChannel: vscode.OutputChannel | undefined;
+
     private constructor() {}
 
     public static getInstance(): DataManager {
@@ -71,21 +61,39 @@ export class DataManager {
         return DataManager.instance;
     }
 
+    // --- GLOBAL LOGGER ---
+    public static log(message: string) {
+        if (!this.outputChannel) {
+            this.outputChannel = vscode.window.createOutputChannel("ReLumiStudio Debug");
+        }
+        this.outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+    }
+
     public async loadData() {
+        DataManager.log("--- Loading Data ---");
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) return;
 
         const rootPath = folders[0].uri.fsPath;
         const jsonDir = path.join(rootPath, 'JSON');
 
-        this.loadGeneric(path.join(jsonDir, 'commands.json'), this.commands, 'Name');
+        // Load hints.json
         this.loadGeneric(path.join(jsonDir, 'hints.json'), this.hints, 'Cmd');
+        
+        // Load Maps
         this.loadGeneric(path.join(jsonDir, 'flags.json'), this.flags, 'Name');
-        this.loadGeneric(path.join(jsonDir, 'sys_flags.json'), this.sysFlags, 'Name');
-        this.loadGeneric(path.join(jsonDir, 'work.json'), this.works, 'Name');
+        this.loadGeneric(path.join(jsonDir, 'works.json'), this.works, 'Name');
+
+        // Try both naming conventions for sysflags
+        if (fs.existsSync(path.join(jsonDir, 'sysflags.json'))) {
+             this.loadGeneric(path.join(jsonDir, 'sysflags.json'), this.sysFlags, 'Name');
+        } else {
+             this.loadGeneric(path.join(jsonDir, 'sys_flags.json'), this.sysFlags, 'Name');
+        }
 
         await this.loadGameAssets(rootPath);
         
+        DataManager.log(`Data Load Complete. Hints: ${this.hints.size}, Flags: ${this.flags.size}, SysFlags: ${this.sysFlags.size}, Works: ${this.works.size}`);
         this.onDataLoadedEmitter.fire();
     }
 
@@ -124,16 +132,12 @@ export class DataManager {
         if (fs.existsSync(uiDbPath)) {
             this.parseUIDatabase(uiDbPath, this.balls);
         }
-        
-        console.log(`[DataManager] Loaded ${this.messages.size} message files, ${this.msgWindowData.size} speaker mappings.`);
     }
 
     private async parseMessageAsset(filePath: string, fileName: string) {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
-            
             const isSpeakerFile = fileName.includes('dlp_speakers_name') || fileName.includes('dlp_speaker_name');
-            
             if (!content.includes('labelDataArray') && !isSpeakerFile) return;
 
             const rawName = fileName;
@@ -261,13 +265,10 @@ export class DataManager {
             }
             commitWord();
             if (currentLabel && currentFullText) labelMap.set(currentLabel.toLowerCase(), currentFullText);
-
             this.messages.set(rawName.toLowerCase(), labelMap);
             this.messages.set(shortName.toLowerCase(), labelMap);
 
-        } catch (e) {
-            console.error(`Error parsing message file ${fileName}`, e);
-        }
+        } catch (e) { console.error(`Error parsing message file ${fileName}`, e); }
     }
 
     private parseUnityAsset(filePath: string, targetMap: Map<number, string>) {
@@ -309,10 +310,8 @@ export class DataManager {
             const content = fs.readFileSync(filePath, 'utf-8');
             const lines = content.split(/\r?\n/);
             let currentLabel: string | null = null;
-            
             const labelRegex = /^(?:- )?(?:label|labelName)\s*:\s*(.+)/i;
             const talkRegex = /^(?:talk_label|talkLabel)\s*:\s*(.+)/i;
-
             for (const line of lines) {
                 const trimmed = line.trim();
                 const labelMatch = trimmed.match(labelRegex);
@@ -328,9 +327,7 @@ export class DataManager {
                     this.msgWindowData.set(currentLabel.toLowerCase(), val);
                 }
             }
-        } catch (e) {
-            console.error("Error parsing MsgWindowData", e);
-        }
+        } catch (e) { console.error("Error parsing MsgWindowData", e); }
     }
 
     private loadGeneric(filePath: string, map: Map<string, any>, keyProp: string) {
@@ -340,7 +337,9 @@ export class DataManager {
                 if (Array.isArray(data)) {
                     data.forEach(item => { if (item[keyProp]) map.set(item[keyProp], item); });
                 }
-            } catch (e) { console.error(`Error loading ${path.basename(filePath)}`, e); }
+            } catch (e) { DataManager.log(`Error loading ${path.basename(filePath)}: ${e}`); }
+        } else {
+             DataManager.log(`File missing: ${filePath}`);
         }
     }
 
@@ -364,11 +363,31 @@ export class DataManager {
     }
 
     public updateHintCache(newHints: HintConfig[]) { newHints.forEach(h => this.hints.set(h.Cmd, h)); this.onHintsChangedEmitter.fire(); }
-    public saveHintsToDisk(newHints: HintConfig[]) { /* ... */ }
-    public reloadHintsFromDisk() { /* ... */ }
+    public saveHintsToDisk(newHints: HintConfig[]) { 
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders) return;
+        const filePath = path.join(folders[0].uri.fsPath, 'JSON', 'hints.json');
+        try { 
+            const list = Array.from(newHints).sort((a, b) => a.Cmd.localeCompare(b.Cmd)); 
+            fs.writeFileSync(filePath, JSON.stringify(list, null, 2), 'utf-8'); 
+            this.hints.clear();
+            list.forEach(h => this.hints.set(h.Cmd, h));
+            this.onHintsChangedEmitter.fire();
+        } catch (e) {}
+    }
+    
+    public reloadHintsFromDisk() { 
+         const folders = vscode.workspace.workspaceFolders;
+        if (!folders) return;
+        const filePath = path.join(folders[0].uri.fsPath, 'JSON', 'hints.json');
+        this.loadGeneric(filePath, this.hints, 'Cmd');
+        this.onHintsChangedEmitter.fire();
+    }
+
     public removeFlag(name: string) { if (this.flags.has(name)) { this.flags.delete(name); this.saveMap('flags.json', this.flags); } }
     public removeSysFlag(name: string) { if (this.sysFlags.has(name)) { this.sysFlags.delete(name); this.saveMap('sys_flags.json', this.sysFlags); } }
     public removeWork(name: string) { if (this.works.has(name)) { this.works.delete(name); this.saveMap('work.json', this.works); } }
+    
     private saveMap(filename: string, map: Map<string, any>) {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) return;

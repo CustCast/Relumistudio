@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { DataManager } from './dataManager';
+import { DataManager, HintConfig } from './dataManager';
 
-// Define the interface for the command context
 interface CommandContext {
     name: string;
     argStart: number;
@@ -18,16 +17,15 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
         const word = document.getText(range);
         const data = DataManager.getInstance();
 
-        // 1. Prefixes (#FLAG, $SYS, @WORK)
+        // 1. Prefixes
         if (word.startsWith('#') && data.flags.has(word)) return this.simpleHover(data.flags.get(word)!, 'Flag');
         if (word.startsWith('$') && data.sysFlags.has(word)) return this.simpleHover(data.sysFlags.get(word)!, 'System Flag');
         if (word.startsWith('@') && data.works.has(word)) return this.simpleHover(data.works.get(word)!, 'Work Variable');
 
-        // 2. Commands
-        if (data.commands.has(word)) {
-            const cmd = data.commands.get(word)!;
-            const hint = data.hints.get(word);
-            return this.commandHover(cmd, hint);
+        // 2. Commands (Hints Only)
+        if (data.hints.has(word)) {
+            const hint = data.hints.get(word)!;
+            return this.commandHover(hint);
         }
 
         // 3. Arguments (Numbers)
@@ -45,14 +43,6 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
                     if (param && param.Type) {
                         types = param.Type;
                         dependsOn = param.DependsOn;
-                    }
-                }
-
-                if (types.length === 0) {
-                    const cmd = data.commands.get(context.name);
-                    if (cmd && cmd.Args && cmd.Args.length > context.argIndex) {
-                        const t = cmd.Args[context.argIndex].Type;
-                        types = Array.isArray(t) ? t : [t];
                     }
                 }
 
@@ -88,32 +78,38 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
         return new vscode.Hover(md);
     }
 
-    private commandHover(cmd: any, hint: any) {
+    private commandHover(hint: HintConfig) {
         const md = new vscode.MarkdownString();
-        const args = cmd.Args.map((a: any) => a.TentativeName).join(', ');
-        md.appendCodeblock(`${cmd.Name}(${args})`, 'bdsp');
-        const desc = hint?.Description || cmd.Description;
-        if (desc) md.appendMarkdown(`\n\n${desc}`);
+        // Construct signature from Params
+        const paramStr = hint.Params ? hint.Params.map(p => p.Ref).join(', ') : '';
+        md.appendCodeblock(`${hint.Cmd}(${paramStr})`, 'bdsp');
+        
+        if (hint.Id !== undefined) {
+            md.appendMarkdown(`\n**ID:** ${hint.Id}`);
+        }
+        if (hint.Description) {
+            md.appendMarkdown(`\n\n${hint.Description}`);
+        }
         return new vscode.Hover(md);
     }
 
     private getCommandContext(document: vscode.TextDocument, position: vscode.Position): CommandContext | null {
         const line = document.lineAt(position.line).text;
-        const cmdRegex = /([A-Z_][A-Z0-9_]*)\s*\(/g;
+        const cmdRegex = /([A-Z0-9_]+)\s*\(/g;
         let match;
         
         while ((match = cmdRegex.exec(line)) !== null) {
             const start = match.index + match[0].length; 
-            if (start > position.character) break;
+            if (match.index > position.character) break;
 
             let inString = false;
-            let depth = 0;
+            let depth = 1;
             let argIndex = 0;
-            let isClosed = false;
+            let inside = true;
 
             for (let i = start; i < line.length; i++) {
                 if (i === position.character) {
-                    if (!isClosed) {
+                    if (inside) {
                         return { 
                             name: match[1], 
                             argStart: start, 
@@ -130,10 +126,10 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
                 } else if (!inString) {
                     if (char === '(') depth++;
                     else if (char === ')') {
-                        if (depth > 0) depth--;
-                        else isClosed = true;
+                        depth--;
+                        if (depth === 0) { inside = false; break; }
                     }
-                    else if (char === ',' && depth === 0) {
+                    else if (char === ',' && depth === 1) {
                         argIndex++;
                     }
                 }
