@@ -3,6 +3,23 @@ import { DataManager } from './dataManager';
 
 export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
 
+    // Helper to map specific types to the 5 Parent categories
+    private getParentType(rawType: string): string {
+        const type = rawType.trim();
+        const map: { [key: string]: string[] } = {
+            "Value": ["Value", "Number", "Pokemon", "Ball", "Form", "Item", "TagIndex", "NumberIndex"],
+            "Work": ["Work"],
+            "Flag": ["Flag"],
+            "SysFlag": ["SysFlag", "SystemFlag"],
+            "String": ["String", "Event", "Message", "Label"]
+        };
+
+        for (const [parent, children] of Object.entries(map)) {
+            if (children.includes(type)) return parent;
+        }
+        return "Value"; 
+    }
+
     public provideSignatureHelp(
         document: vscode.TextDocument,
         position: vscode.Position,
@@ -20,7 +37,6 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
             const { commandName, argIndex } = cmdContext;
             const activeDef = data?.hints?.get(commandName);
 
-            // If we found a command but no definition, we can't help.
             if (!activeDef) return null;
 
             const help = new vscode.SignatureHelp();
@@ -35,18 +51,35 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
                  maxArgs = activeDef.Params.reduce((m, p) => Math.max(m, p.Index + 1), 0);
             }
 
-            // Always show at least enough args to cover the user's cursor
             const showCount = Math.max(maxArgs, argIndex + 1);
 
             for (let i = 0; i < showCount; i++) {
                 let paramLabel = `Arg${i}`;
-                let paramDoc = "";
+                let paramDoc: vscode.MarkdownString | string = "";
 
                 if (activeDef.Params) {
                     const hintParam = activeDef.Params.find(p => p.Index === i);
                     if (hintParam) {
                         paramLabel = hintParam.Ref || `Arg${i}`;
-                        if (hintParam.Description) paramDoc = hintParam.Description;
+                        
+                        // Map Types
+                        const rawTypes = hintParam.Type || ['Value'];
+                        const parentTypes = Array.from(new Set(rawTypes.map(t => this.getParentType(t))));
+                        
+                        // Format: ('Value' | 'Work')
+                        const typeStr = parentTypes.length > 0 ? `(\`${parentTypes.join('` | `')}\`)` : '';
+                        const descStr = hintParam.Description || '';
+                        
+                        // **Name** ('Type'): _Description_
+                        const md = new vscode.MarkdownString();
+                        md.appendMarkdown(`**${paramLabel}** ${typeStr}`);
+                        
+                        if (descStr) {
+                            md.appendMarkdown(`: _${descStr}_`);
+                        }
+                        
+                        md.isTrusted = true;
+                        paramDoc = md;
                     }
                 }
 
@@ -79,11 +112,9 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
     private getCommandContext(document: vscode.TextDocument, position: vscode.Position) {
         const lineText = document.lineAt(position.line).text;
         
-        // Sanity Check: Is this a comment?
         const commentIdx = lineText.indexOf('//');
         if (commentIdx !== -1 && position.character > commentIdx) return null;
 
-        // Scan LEFT from cursor to find the closest open parenthesis
         let depth = 0;
         let argIndex = 0;
         let openParenIndex = -1;
@@ -97,7 +128,6 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
                 if (depth > 0) {
                     depth--;
                 } else {
-                    // Found the opening '(' for our command
                     openParenIndex = i;
                     break;
                 }
@@ -108,7 +138,6 @@ export class BDSPSignatureHelpProvider implements vscode.SignatureHelpProvider {
 
         if (openParenIndex === -1) return null; 
 
-        // Extract the Word immediately before the '('
         const textBefore = lineText.substring(0, openParenIndex);
         const match = textBefore.match(/([A-Z0-9_]+)\s*$/);
 

@@ -9,6 +9,23 @@ interface CommandContext {
 }
 
 export class BDSPHoverProvider implements vscode.HoverProvider {
+
+    // Logic to map specific types to the 5 Parent categories
+    private getParentType(rawType: string): string {
+        const type = rawType.trim();
+        const map: { [key: string]: string[] } = {
+            "Value": ["Value", "Number", "Pokemon", "Ball", "Form", "Item", "TagIndex", "NumberIndex"],
+            "Work": ["Work"],
+            "Flag": ["Flag"],
+            "SysFlag": ["SysFlag", "SystemFlag"],
+            "String": ["String", "Event", "Message", "Label"]
+        };
+
+        for (const [parent, children] of Object.entries(map)) {
+            if (children.includes(type)) return parent;
+        }
+        return "Value"; // Fallback
+    }
     
     provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.ProviderResult<vscode.Hover> {
         const range = document.getWordRangeAtPosition(position);
@@ -90,6 +107,32 @@ export class BDSPHoverProvider implements vscode.HoverProvider {
         if (hint.Description) {
             md.appendMarkdown(`\n\n${hint.Description}`);
         }
+
+        // --- Parameter List Section ---
+        if (hint.Params && hint.Params.length > 0) {
+            md.appendMarkdown('\n\n---');
+            md.appendMarkdown('\n**Parameters:**');
+            
+            // Sort by index
+            const sortedParams = [...hint.Params].sort((a, b) => a.Index - b.Index);
+            
+            for (const p of sortedParams) {
+                const name = p.Ref || `Arg${p.Index}`;
+                
+                // Map and Deduplicate Types
+                const rawTypes = p.Type || ['Value'];
+                const parentTypes = Array.from(new Set(rawTypes.map(t => this.getParentType(t))));
+                
+                // Format: ('Value' | 'Work')
+                const typeStr = parentTypes.length > 0 ? `(\`${parentTypes.join('` | `')}\`)` : '';
+                
+                const descStr = p.Description ? `: _${p.Description}_` : '';
+                
+                // * **Name** ('Type' | 'Type'): _Description_
+                md.appendMarkdown(`\n* **${name}** ${typeStr}${descStr}`);
+            }
+        }
+
         return new vscode.Hover(md);
     }
 
