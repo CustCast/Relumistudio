@@ -235,9 +235,9 @@ export function activate(context: vscode.ExtensionContext) {
             if (term !== undefined) allExplorers.forEach(p => p.setFilter(term));
         }),
         vscode.commands.registerCommand('relumistudio.clearExplorerFilter', () => allExplorers.forEach(p => p.setFilter(""))),
-        vscode.commands.registerCommand('relumistudio.convertToMacro', () => {
+        vscode.commands.registerCommand('relumistudio.convertToMacro', async () => {
             const editor = vscode.window.activeTextEditor;
-            if (editor) convertToMacro(editor);
+            if (editor) await convertToMacro(editor);
         }),
         vscode.commands.registerCommand('relumistudio.openMsgCreator', () => TalkMsgCreatorPanel.createOrShow(context.extensionUri))
     );

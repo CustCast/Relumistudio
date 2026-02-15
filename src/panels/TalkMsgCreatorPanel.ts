@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataManager } from '../dataManager';
+import * as crypto from 'crypto';
 
 /** Bundle files that support inline messages */
 const DATA_FILES = [
@@ -64,18 +64,18 @@ export class TalkMsgCreatorPanel {
             'relumiTalkMsgCreator',
             'Message Creator',
             column,
-            { enableScripts: true }
+            { enableScripts: true, localResourceRoots: [] }
         );
         TalkMsgCreatorPanel.currentPanel = new TalkMsgCreatorPanel(panel, extensionUri);
     }
 
-    private _insertAtCursor(text: string) {
+    private async _insertAtCursor(text: string) {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showWarningMessage('No active text editor to insert into.');
             return;
         }
-        editor.edit(editBuilder => {
+        await editor.edit(editBuilder => {
             editBuilder.insert(editor.selection.active, text);
         });
     }
@@ -92,11 +92,13 @@ export class TalkMsgCreatorPanel {
     private _getWebviewContent(): string {
         const typeOptions = MSG_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
         const bundleOptions = DATA_FILES.map(f => `<option value="${f}">${f}</option>`).join('');
+        const nonce = crypto.randomBytes(16).toString('hex');
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Message Creator</title>
     <style>
@@ -214,7 +216,7 @@ export class TalkMsgCreatorPanel {
         <button class="btn-secondary" onclick="copyToClipboard()">Copy to Clipboard</button>
     </div>
 
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         function getValues() {
@@ -231,6 +233,8 @@ export class TalkMsgCreatorPanel {
             if (!v.label || !v.text) return '';
             // Escape the text: convert actual newlines to \\n sequences
             let text = v.text.replace(/\\r\\n/g, '\\\\n').replace(/\\n/g, '\\\\n');
+            // Replace ASCII apostrophes with smart quotes (ANTLR grammar uses ' as delimiters)
+            text = text.replace(/'/g, '\\u2019');
             return \`_MACRO_MSG('\${v.type}', '\${v.bundle}', '\${v.label}', '\${text}')\`;
         }
 
