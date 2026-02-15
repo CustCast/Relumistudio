@@ -11,6 +11,8 @@ import { MessagePreviewProvider } from './messagePreviewProvider';
 import { ScriptIndexer } from './indexer';
 import { ScriptTracer } from './tracer'; 
 import { BDSPSignatureHelpProvider } from './signatureProvider';
+import { convertToMacro } from './talkMsgConverter';
+import { TalkMsgCreatorPanel } from './panels/TalkMsgCreatorPanel';
 
 export function activate(context: vscode.ExtensionContext) {
     DataManager.log('ReLumiStudio is active!');
@@ -142,11 +144,17 @@ export function activate(context: vscode.ExtensionContext) {
             if (!rawMessage) {
                 const stdMatch = lineText.match(/(?:_TALKMSG|_TALK_KEYWAIT|_EASY_OBJ_MSG|_EASY_BOARD_MSG)\s*\(\s*'([\w.-]+)%([\w.-]+)'\s*.*\)/);
                 const macroMatch = lineText.match(/(?:_MACRO_TALKMSG|_MACRO_TALK_KEYWAIT|_MACRO_EASY_OBJ_MSG)\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
+                const unifiedMatch = lineText.match(/_MACRO_MSG\s*\(\s*'[^']+'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'[^)]*\)/);
 
-                if (macroMatch) {
+                if (unifiedMatch) {
+                    // _MACRO_MSG('TYPE', 'bundle', 'label', 'text')
+                    rawMessage = unifiedMatch[3];
+                    currentLabel = unifiedMatch[2];
+                }
+                else if (macroMatch) {
                     rawMessage = macroMatch[3];
                     currentLabel = macroMatch[2];
-                } 
+                }
                 else if (stdMatch) {
                     const fileName = stdMatch[1];
                     const label = stdMatch[2];
@@ -226,7 +234,12 @@ export function activate(context: vscode.ExtensionContext) {
             const term = await vscode.window.showInputBox({ prompt: "Filter Explorer..." });
             if (term !== undefined) allExplorers.forEach(p => p.setFilter(term));
         }),
-        vscode.commands.registerCommand('relumistudio.clearExplorerFilter', () => allExplorers.forEach(p => p.setFilter("")))
+        vscode.commands.registerCommand('relumistudio.clearExplorerFilter', () => allExplorers.forEach(p => p.setFilter(""))),
+        vscode.commands.registerCommand('relumistudio.convertToMacro', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor) await convertToMacro(editor);
+        }),
+        vscode.commands.registerCommand('relumistudio.openMsgCreator', () => TalkMsgCreatorPanel.createOrShow(context.extensionUri))
     );
 
     DataManager.getInstance().loadData();

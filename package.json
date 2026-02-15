@@ -123,6 +123,16 @@
         "title": "Clear Explorer Filter",
         "category": "ReLumiStudio",
         "icon": "$(filter-remove)"
+      },
+      {
+        "command": "relumistudio.convertToMacro",
+        "title": "ReLumi: Convert to _MACRO_MSG",
+        "category": "ReLumiStudio"
+      },
+      {
+        "command": "relumistudio.openMsgCreator",
+        "title": "ReLumi: Open Message Creator",
+        "category": "ReLumiStudio"
       }
     ],
     "menus": {
@@ -156,6 +166,16 @@
       "editor/context": [
         {
           "command": "relumistudio.openHintEditor",
+          "when": "editorLangId == bdsp",
+          "group": "1_modification"
+        },
+        {
+          "command": "relumistudio.convertToMacro",
+          "when": "editorLangId == bdsp",
+          "group": "1_modification"
+        },
+        {
+          "command": "relumistudio.openMsgCreator",
           "when": "editorLangId == bdsp",
           "group": "1_modification"
         }
